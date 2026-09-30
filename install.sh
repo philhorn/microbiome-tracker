@@ -25,9 +25,13 @@ rm -rf /var/www/microbiome-app
 
 APP_DIR="/var/www/microbiome-app"
 mkdir -p $APP_DIR/api$APP_DIR/client
+
+# ==========================================
+# BACKEND SETUP
+# ==========================================
+echo "Configuring Backend..."
 cd $APP_DIR/api
 
-echo "Configuring Backend..."
 cat << 'EOF' > package.json
 {
   "name": "microbiome-api",
@@ -44,7 +48,6 @@ cat << 'EOF' > package.json
 }
 EOF
 
-# Suppress the unprivileged LXC warnings during install
 npm install --no-fund --no-audit --loglevel=error
 
 cat << 'EOF' > server.js
@@ -124,10 +127,15 @@ app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.ht
 app.listen(PORT, () => console.log(`API running on port ${PORT}`));
 EOF
 
+# ==========================================
+# FRONTEND SETUP
+# ==========================================
 echo "Building Frontend..."
 cd $APP_DIR/client
-npm create vite@latest . -- --template react
-# Explicitly install lucide-react to prevent the blank page module error
+
+# Added --yes flag to bypass interactive prompts
+npm create vite@latest . --yes -- --template react
+
 npm install lucide-react
 npm install --loglevel=error
 
@@ -172,7 +180,7 @@ export default function App() {
       <form onSubmit={authSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
         <input type="text" placeholder="Username" onChange={e => setUsername(e.target.value)} required style={{ padding: '8px' }}/>
         <input type="password" placeholder="Password" onChange={e => setPassword(e.target.value)} required style={{ padding: '8px' }}/>
-        <button type="submit" style={{ padding: '10px', background: '#2563eb', color: 'white', border: 'none' }}>Submit</button>
+        <button type="submit" style={{ padding: '10px', background: '#2563eb', color: 'white', border: 'none', borderRadius: '4px' }}>Submit</button>
       </form>
       <p style={{ cursor: 'pointer', color: 'blue', marginTop: '10px' }} onClick={() => setIsLoginView(!isLoginView)}>{isLoginView ? "Need an account? Register" : "Have an account? Login"}</p>
     </div>
@@ -210,6 +218,9 @@ npm run build
 mkdir -p ../api/public
 cp -r dist/* ../api/public/
 
+# ==========================================
+# NGINX & PM2 SETUP
+# ==========================================
 echo "Configuring Nginx Reverse Proxy..."
 SERVER_NAME=$DOMAIN_NAME
 if [ "$DOMAIN_NAME" == "local" ]; then SERVER_NAME="_"; fi
