@@ -17,16 +17,20 @@ apt-get install -y curl sqlite3 nginx git python3-certbot-nginx
 curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
 apt-get install -y nodejs
 npm install -g pm2
+hash -r
+
+# Clean previous failed attempts
+pm2 delete all 2>/dev/null || true
+rm -rf /var/www/microbiome-app
 
 APP_DIR="/var/www/microbiome-app"
 mkdir -p $APP_DIR/api$APP_DIR/client
 cd $APP_DIR/api
 
-echo "Configuring Backend (Node.js & SQLite)..."
+echo "Configuring Backend..."
 cat << 'EOF' > package.json
 {
   "name": "microbiome-api",
-  "version": "1.0.0",
   "type": "module",
   "dependencies": {
     "bcrypt": "^5.1.1",
@@ -39,7 +43,9 @@ cat << 'EOF' > package.json
   }
 }
 EOF
-npm install
+
+# Suppress the unprivileged LXC warnings during install
+npm install --no-fund --no-audit --loglevel=error
 
 cat << 'EOF' > server.js
 import express from 'express';
@@ -66,26 +72,10 @@ let db;
 (async () => {
     db = await open({ filename: path.join(__dirname, 'database.sqlite'), driver: sqlite3.Database });
     await db.exec(`
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE,
-            password TEXT,
-            role TEXT DEFAULT 'user'
-        );
-        CREATE TABLE IF NOT EXISTS active_week (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            week_start_date TEXT
-        );
-        CREATE TABLE IF NOT EXISTS logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            week_id INTEGER,
-            food_item TEXT,
-            FOREIGN KEY(user_id) REFERENCES users(id)
-        );
-        INSERT INTO active_week (id, week_start_date) 
-        SELECT 1, date('now', 'weekday 1', '-7 days') 
-        WHERE NOT EXISTS (SELECT 1 FROM active_week WHERE id = 1);
+        CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT, role TEXT DEFAULT 'user');
+        CREATE TABLE IF NOT EXISTS active_week (id INTEGER PRIMARY KEY AUTOINCREMENT, week_start_date TEXT);
+        CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, week_id INTEGER, food_item TEXT, FOREIGN KEY(user_id) REFERENCES users(id));
+        INSERT INTO active_week (id, week_start_date) SELECT 1, date('now', 'weekday 1', '-7 days') WHERE NOT EXISTS (SELECT 1 FROM active_week WHERE id = 1);
     `);
 })();
 
@@ -94,32 +84,20 @@ const authenticate = (req, res, next) => {
     if (!token) return res.status(401).json({ error: 'Unauthorized' });
     jwt.verify(token, SECRET, (err, decoded) => {
         if (err) return res.status(403).json({ error: 'Forbidden' });
-        req.userId = decoded.id;
-        req.userRole = decoded.role;
-        next();
+        req.userId = decoded.id; req.userRole = decoded.role; next();
     });
 };
 
-const requireAdmin = (req, res, next) => {
-    if (req.userRole !== 'admin') return res.status(403).json({ error: 'Admin access required' });
-    next();
-};
-
 app.post('/api/register', async (req, res) => {
-    const { username, password } = req.body;
-    const hash = await bcrypt.hash(password, 10);
-    try {
-        await db.run('INSERT INTO users (username, password) VALUES (?, ?)', [username, hash]);
-        res.json({ success: true });
-    } catch (e) { res.status(400).json({ error: 'Username exists' }); }
+    const hash = await bcrypt.hash(req.body.password, 10);
+    try { await db.run('INSERT INTO users (username, password) VALUES (?, ?)', [req.body.username, hash]); res.json({ success: true }); } 
+    catch (e) { res.status(400).json({ error: 'Username exists' }); }
 });
 
 app.post('/api/login', async (req, res) => {
-    const { username, password } = req.body;
-    const user = await db.get('SELECT * FROM users WHERE username = ?', [username]);
-    if (user && await bcrypt.compare(password, user.password)) {
-        const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, SECRET);
-        res.json({ token, username: user.username, role: user.role });
+    const user = await db.get('SELECT * FROM users WHERE username = ?', [req.body.username]);
+    if (user && await bcrypt.compare(req.body.password, user.password)) {
+        res.json({ token: jwt.sign({ id: user.id, username: user.username, role: user.role }, SECRET), username: user.username, role: user.role });
     } else { res.status(401).json({ error: 'Invalid credentials' }); }
 });
 
@@ -130,44 +108,31 @@ app.get('/api/checklist', authenticate, async (req, res) => {
 });
 
 app.post('/api/toggle', authenticate, async (req, res) => {
-    const { item, checked } = req.body;
     const activeWeek = await db.get('SELECT id FROM active_week WHERE id = (SELECT MAX(id) FROM active_week)');
-    if (checked) {
-        await db.run('INSERT INTO logs (user_id, week_id, food_item) VALUES (?, ?, ?)', [req.userId, activeWeek.id, item]);
-    } else {
-        await db.run('DELETE FROM logs WHERE user_id = ? AND week_id = ? AND food_item = ?', [req.userId, activeWeek.id, item]);
-    }
+    if (req.body.checked) { await db.run('INSERT INTO logs (user_id, week_id, food_item) VALUES (?, ?, ?)', [req.userId, activeWeek.id, req.body.item]); } 
+    else { await db.run('DELETE FROM logs WHERE user_id = ? AND week_id = ? AND food_item = ?', [req.userId, activeWeek.id, req.body.item]); }
     res.json({ success: true });
 });
 
-app.get('/api/admin/dashboard', authenticate, requireAdmin, async (req, res) => {
+app.get('/api/admin/dashboard', authenticate, (req, res, next) => req.userRole === 'admin' ? next() : res.status(403).json({ error: 'Admin access required' }), async (req, res) => {
     const activeWeek = await db.get('SELECT id FROM active_week WHERE id = (SELECT MAX(id) FROM active_week)');
-    const scores = await db.all(`
-        SELECT u.username, COUNT(l.id) as current_score
-        FROM users u
-        LEFT JOIN logs l ON u.id = l.user_id AND l.week_id = ?
-        WHERE u.role = 'user'
-        GROUP BY u.id
-    `, [activeWeek.id]);
-    res.json(scores);
+    res.json(await db.all(`SELECT u.username, COUNT(l.id) as current_score FROM users u LEFT JOIN logs l ON u.id = l.user_id AND l.week_id = ? WHERE u.role = 'user' GROUP BY u.id`, [activeWeek.id]));
 });
 
-cron.schedule('59 23 * * 0', async () => {
-    await db.run("INSERT INTO active_week (week_start_date) VALUES (date('now', 'weekday 1'))");
-});
-
+cron.schedule('59 23 * * 0', async () => await db.run("INSERT INTO active_week (week_start_date) VALUES (date('now', 'weekday 1'))"));
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 app.listen(PORT, () => console.log(`API running on port ${PORT}`));
 EOF
 
-echo "Building Frontend (React)..."
-cd ../client
+echo "Building Frontend..."
+cd $APP_DIR/client
 npm create vite@latest . -- --template react
-npm install
+# Explicitly install lucide-react to prevent the blank page module error
+npm install lucide-react
+npm install --loglevel=error
 
 cat << 'EOF' > src/App.jsx
 import React, { useState, useEffect } from 'react';
-
 const defaultFoods = ["Artichoke", "Asparagus", "Broccoli", "Apple", "Avocado", "Blueberry", "Oats", "Quinoa", "Almonds", "Walnuts"];
 
 export default function App() {
@@ -180,117 +145,60 @@ export default function App() {
   const [isLoginView, setIsLoginView] = useState(true);
 
   useEffect(() => {
-    if (token && role === 'user') fetchChecklist();
-    if (token && role === 'admin') fetchDashboard();
+    if (token && role === 'user') fetch('/api/checklist', { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json()).then(d => setCheckedItems(d || []));
+    if (token && role === 'admin') fetch('/api/admin/dashboard', { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json()).then(d => setClientScores(d || []));
   }, [token, role]);
-
-  const fetchChecklist = () => {
-    fetch('/api/checklist', { headers: { Authorization: `Bearer ${token}` } })
-      .then(res => res.json())
-      .then(data => setCheckedItems(data || []));
-  };
-
-  const fetchDashboard = () => {
-    fetch('/api/admin/dashboard', { headers: { Authorization: `Bearer ${token}` } })
-      .then(res => res.json())
-      .then(data => setClientScores(data || []));
-  };
 
   const authSubmit = async (e) => {
     e.preventDefault();
-    const endpoint = isLoginView ? '/api/login' : '/api/register';
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password })
-    });
+    const res = await fetch(isLoginView ? '/api/login' : '/api/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
     const data = await res.json();
-    if (data.token) {
-      localStorage.setItem('token', data.token);
-      localStorage.setItem('role', data.role);
-      setToken(data.token);
-      setRole(data.role);
-    } else if (!isLoginView && data.success) {
-      setIsLoginView(true);
-      alert("Registered! Please log in.");
-    } else { alert(data.error); }
+    if (data.token) { localStorage.setItem('token', data.token); localStorage.setItem('role', data.role); setToken(data.token); setRole(data.role); } 
+    else if (!isLoginView && data.success) { setIsLoginView(true); alert("Registered! Please log in."); } 
+    else { alert(data.error); }
   };
 
   const handleToggle = async (item) => {
-    const isChecked = checkedItems.includes(item);
-    const newState = !isChecked;
+    const newState = !checkedItems.includes(item);
     setCheckedItems(prev => newState ? [...prev, item] : prev.filter(i => i !== item));
-    await fetch('/api/toggle', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ item, checked: newState })
-    });
+    await fetch('/api/toggle', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ item, checked: newState }) });
   };
 
-  const logout = () => {
-    localStorage.clear();
-    setToken(null);
-    setRole('user');
-  };
+  const logout = () => { localStorage.clear(); setToken(null); setRole('user'); };
 
-  if (!token) {
-    return (
-      <div style={{ maxWidth: '400px', margin: '50px auto', fontFamily: 'system-ui', padding: '20px' }}>
-        <h2>{isLoginView ? "Login" : "Register"}</h2>
-        <form onSubmit={authSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          <input type="text" placeholder="Username" onChange={e => setUsername(e.target.value)} required style={{ padding: '8px' }}/>
-          <input type="password" placeholder="Password" onChange={e => setPassword(e.target.value)} required style={{ padding: '8px' }}/>
-          <button type="submit" style={{ padding: '10px', background: '#2563eb', color: 'white', border: 'none' }}>Submit</button>
-        </form>
-        <p style={{ cursor: 'pointer', color: 'blue', marginTop: '10px' }} onClick={() => setIsLoginView(!isLoginView)}>
-          {isLoginView ? "Need an account? Register" : "Have an account? Login"}
-        </p>
-      </div>
-    );
-  }
+  if (!token) return (
+    <div style={{ maxWidth: '400px', margin: '50px auto', fontFamily: 'system-ui', padding: '20px' }}>
+      <h2>{isLoginView ? "Login" : "Register"}</h2>
+      <form onSubmit={authSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        <input type="text" placeholder="Username" onChange={e => setUsername(e.target.value)} required style={{ padding: '8px' }}/>
+        <input type="password" placeholder="Password" onChange={e => setPassword(e.target.value)} required style={{ padding: '8px' }}/>
+        <button type="submit" style={{ padding: '10px', background: '#2563eb', color: 'white', border: 'none' }}>Submit</button>
+      </form>
+      <p style={{ cursor: 'pointer', color: 'blue', marginTop: '10px' }} onClick={() => setIsLoginView(!isLoginView)}>{isLoginView ? "Need an account? Register" : "Have an account? Login"}</p>
+    </div>
+  );
 
-  if (role === 'admin') {
-    return (
-      <div style={{ fontFamily: 'system-ui', maxWidth: '800px', margin: '0 auto', padding: '20px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h2>Dietitian Dashboard: Active Week</h2>
-          <button onClick={logout} style={{ padding: '6px 12px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '4px' }}>Logout</button>
-        </div>
-        <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '20px' }}>
-          <thead>
-            <tr style={{ background: '#f8fafc', borderBottom: '2px solid #cbd5e1' }}>
-              <th style={{ padding: '12px', textAlign: 'left' }}>Client Name</th>
-              <th style={{ padding: '12px', textAlign: 'left' }}>Current Score</th>
-              <th style={{ padding: '12px', textAlign: 'left' }}>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {clientScores.map((client) => (
-              <tr key={client.username} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                <td style={{ padding: '12px' }}>{client.username}</td>
-                <td style={{ padding: '12px', fontWeight: 'bold' }}>{client.current_score} / 30</td>
-                <td style={{ padding: '12px' }}>{client.current_score >= 30 ? '✅ Goal Met' : '⏳ In Progress'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+  if (role === 'admin') return (
+    <div style={{ fontFamily: 'system-ui', maxWidth: '800px', margin: '0 auto', padding: '20px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h2>Dietitian Dashboard</h2><button onClick={logout} style={{ padding: '6px 12px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '4px' }}>Logout</button>
       </div>
-    );
-  }
+      <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '20px', textAlign: 'left' }}>
+        <thead><tr style={{ background: '#f8fafc', borderBottom: '2px solid #cbd5e1' }}><th style={{ padding: '12px' }}>Client</th><th style={{ padding: '12px' }}>Score</th></tr></thead>
+        <tbody>{clientScores.map(c => <tr key={c.username} style={{ borderBottom: '1px solid #e2e8f0' }}><td style={{ padding: '12px' }}>{c.username}</td><td style={{ padding: '12px' }}>{c.current_score} / 30</td></tr>)}</tbody>
+      </table>
+    </div>
+  );
 
   return (
     <div style={{ fontFamily: 'system-ui', maxWidth: '600px', margin: '0 auto', padding: '20px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h2>My Microbiome Tracker</h2>
-        <button onClick={logout} style={{ padding: '6px 12px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '4px' }}>Logout</button>
+        <h2>My Microbiome Tracker</h2><button onClick={logout} style={{ padding: '6px 12px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '4px' }}>Logout</button>
       </div>
-      <div style={{ background: '#dcfce7', padding: '10px', borderRadius: '8px', marginBottom: '20px' }}>
-        <strong>Current Score: {checkedItems.length} / 30</strong>
-      </div>
+      <div style={{ background: '#dcfce7', padding: '10px', borderRadius: '8px', marginBottom: '20px' }}><strong>Current Score: {checkedItems.length} / 30</strong></div>
       {defaultFoods.map(food => (
         <div key={food} style={{ padding: '10px', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between' }}>
-          <span>{food}</span>
-          <input type="checkbox" checked={checkedItems.includes(food)} onChange={() => handleToggle(food)} style={{ transform: 'scale(1.5)' }} />
+          <span>{food}</span><input type="checkbox" checked={checkedItems.includes(food)} onChange={() => handleToggle(food)} style={{ transform: 'scale(1.5)' }} />
         </div>
       ))}
     </div>
