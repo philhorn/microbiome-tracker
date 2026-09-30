@@ -19,12 +19,11 @@ apt-get install -y nodejs
 npm install -g pm2
 hash -r
 
-# Clean previous failed attempts
 pm2 delete all 2>/dev/null || true
 rm -rf /var/www/microbiome-app
 
 APP_DIR="/var/www/microbiome-app"
-mkdir -p $APP_DIR/api$APP_DIR/client
+mkdir -p $APP_DIR/api$APP_DIR/client/src
 
 # ==========================================
 # BACKEND SETUP
@@ -131,14 +130,48 @@ EOF
 # FRONTEND SETUP
 # ==========================================
 echo "Building Frontend..."
-mkdir -p /var/www/microbiome-app/client
-cd /var/www/microbiome-app/client
+cd $APP_DIR/client
 
-# Added --yes flag to bypass interactive prompts
-npm create vite@latest . --yes -- --template react
+# Manually write React/Vite configurations to avoid interactive CLI prompts
+cat << 'EOF' > package.json
+{
+  "name": "microbiome-client",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": { "dev": "vite", "build": "vite build" },
+  "dependencies": { "react": "^18.2.0", "react-dom": "^18.2.0", "lucide-react": "^0.263.1" },
+  "devDependencies": { "@vitejs/plugin-react": "^4.2.1", "vite": "^5.1.4" }
+}
+EOF
 
-npm install lucide-react
-npm install --loglevel=error
+cat << 'EOF' > vite.config.js
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+export default defineConfig({ plugins: [react()] })
+EOF
+
+cat << 'EOF' > index.html
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Microbiome Tracker</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
+EOF
+
+cat << 'EOF' > src/main.jsx
+import React from 'react'
+import ReactDOM from 'react-dom/client'
+import App from './App.jsx'
+ReactDOM.createRoot(document.getElementById('root')).render(<React.StrictMode><App /></React.StrictMode>)
+EOF
 
 cat << 'EOF' > src/App.jsx
 import React, { useState, useEffect } from 'react';
@@ -215,6 +248,7 @@ export default function App() {
 }
 EOF
 
+npm install --no-fund --no-audit --loglevel=error
 npm run build
 mkdir -p ../api/public
 cp -r dist/* ../api/public/
