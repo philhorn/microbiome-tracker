@@ -131,7 +131,8 @@ EOF
 # FRONTEND SETUP
 # ==========================================
 echo "Building Frontend..."
-cd $APP_DIR/client
+mkdir -p /var/www/microbiome-app/client
+cd /var/www/microbiome-app/client
 
 # Added --yes flag to bypass interactive prompts
 npm create vite@latest . --yes -- --template react
