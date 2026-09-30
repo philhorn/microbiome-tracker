@@ -287,7 +287,7 @@ systemctl restart nginx
 
 if [ "$DOMAIN_NAME" != "local" ]; then
     echo "Provisioning SSL Certificate..."
-    certbot --nginx -d $DOMAIN_NAME -m$ADMIN_EMAIL --non-interactive --agree-tos --redirect
+    certbot --nginx -d $DOMAIN_NAME -m $ADMIN_EMAIL --non-interactive --agree-tos --redirect
 fi
 
 echo "Starting Application Service..."
