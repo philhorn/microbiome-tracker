@@ -1,3 +1,4 @@
+cat << 'FINAL_DEPLOY' > local_install.sh
 #!/bin/bash
 set -e
 
@@ -23,7 +24,8 @@ pm2 delete all 2>/dev/null || true
 rm -rf /var/www/microbiome-app
 
 APP_DIR="/var/www/microbiome-app"
-mkdir -p $APP_DIR/api$APP_DIR/client/src
+mkdir -p $APP_DIR/api
+mkdir -p $APP_DIR/client/src
 
 # ==========================================
 # BACKEND SETUP
@@ -132,7 +134,6 @@ EOF
 echo "Building Frontend..."
 cd $APP_DIR/client
 
-# Manually write React/Vite configurations to avoid interactive CLI prompts
 cat << 'EOF' > package.json
 {
   "name": "microbiome-client",
@@ -298,3 +299,7 @@ pm2 startup
 echo "========================================="
 echo "Deployment Complete!"
 echo "========================================="
+FINAL_DEPLOY
+
+chmod +x local_install.sh
+./local_install.sh
