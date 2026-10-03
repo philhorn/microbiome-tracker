@@ -9,11 +9,13 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import rateLimit from 'express-rate-limit';
+import fs from 'fs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = 3001;
 const SECRET = crypto.randomBytes(32).toString('hex');
+const ADMIN_CRED_FILE = path.join(__dirname, 'admin_credentials.txt');
 
 app.use(cors());
 app.use(express.json());
@@ -29,9 +31,34 @@ let db;
         CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT, role TEXT DEFAULT 'user', family_id INTEGER, display_name TEXT, link_code TEXT, sort_order INTEGER DEFAULT 0);
         CREATE TABLE IF NOT EXISTS active_week (id INTEGER PRIMARY KEY AUTOINCREMENT, week_start_date TEXT);
         CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, week_id INTEGER, food_item TEXT, FOREIGN KEY(user_id) REFERENCES users(id));
+        CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
         INSERT INTO active_week (id, week_start_date) SELECT 1, date('now', 'weekday 1', '-7 days') WHERE NOT EXISTS (SELECT 1 FROM active_week WHERE id = 1);
+        INSERT OR IGNORE INTO settings (key, value) VALUES ('max_attempts', '5'), ('lockout_mins', '15');
     `);
+    
+    // Schema updates
     try { await db.exec("ALTER TABLE users ADD COLUMN is_suspended INTEGER DEFAULT 0;"); } catch (e) {}
+    try { await db.exec("ALTER TABLE users ADD COLUMN failed_attempts INTEGER DEFAULT 0;"); } catch (e) {}
+    try { await db.exec("ALTER TABLE users ADD COLUMN locked_until TEXT;"); } catch (e) {}
+
+    // Secure Admin Bootstrap
+    const adminExists = await db.get("SELECT 1 FROM users WHERE role = 'admin'");
+    if (!adminExists) {
+        const tempPassword = crypto.randomBytes(6).toString('hex');
+        const adminHash = await bcrypt.hash(tempPassword, 10);
+        await db.exec(`INSERT INTO users (username, password, role, display_name) VALUES ('admin', '${adminHash}', 'admin', 'System Admin')`);
+        
+        const credText = `INITIAL SYSTEM SETUP\n--------------------\nUsername: admin\nTemporary Password: ${tempPassword}\n\nPlease log into the web interface and change this password immediately in the Profile tab. This file will be securely deleted once the password is changed.\n`;
+        fs.writeFileSync(ADMIN_CRED_FILE, credText, { mode: 0o600 });
+        
+        console.log("=================================================");
+        console.log("INITIAL ADMIN ACCOUNT CREATED");
+        console.log(`Password saved to: ${ADMIN_CRED_FILE}`);
+        console.log("=================================================");
+    }
+    
+    // Secure the DB file permissions on the host OS
+    try { fs.chmodSync(path.join(__dirname, 'database.sqlite'), 0o600); } catch(e) {}
 })();
 
 const authenticate = (req, res, next) => {
@@ -44,6 +71,10 @@ const authenticate = (req, res, next) => {
         req.userId = decoded.id; req.userRole = decoded.role; next();
     });
 };
+
+app.get('/api/setup-status', (req, res) => {
+    res.json({ needsSetup: fs.existsSync(ADMIN_CRED_FILE) });
+});
 
 app.post('/api/register', registerLimiter, async (req, res) => {
     const rawUsername = req.body.username;
@@ -68,20 +99,44 @@ app.post('/api/login', async (req, res) => {
     if (!req.body.username) return res.status(400).json({ error: 'Username required' });
     const lowerUsername = req.body.username.toLowerCase();
     const user = await db.get('SELECT * FROM users WHERE LOWER(username) = ?', [lowerUsername]);
-    if (user && await bcrypt.compare(req.body.password, user.password)) {
-        if (user.is_suspended) return res.status(403).json({ error: 'Account suspended' });
+    
+    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+    if (user.is_suspended) return res.status(403).json({ error: 'Account suspended' });
+    
+    if (user.locked_until && new Date(user.locked_until) > new Date()) {
+        return res.status(403).json({ error: 'Account temporarily locked due to too many failed attempts. Try again later.' });
+    }
+
+    if (await bcrypt.compare(req.body.password, user.password)) {
+        await db.run('UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE id = ?', [user.id]);
         res.json({ token: jwt.sign({ id: user.id, username: user.username, role: user.role }, SECRET), id: user.id, username: user.username, role: user.role, name: user.display_name, link_code: user.link_code });
-    } else { res.status(401).json({ error: 'Invalid credentials' }); }
+    } else { 
+        const attempts = (user.failed_attempts || 0) + 1;
+        let lockedUntil = null;
+        const limitSettings = await db.get("SELECT value FROM settings WHERE key = 'max_attempts'");
+        const maxAttempts = limitSettings ? parseInt(limitSettings.value) : 5;
+        
+        if (attempts >= maxAttempts) {
+            const minSettings = await db.get("SELECT value FROM settings WHERE key = 'lockout_mins'");
+            const lockoutMins = minSettings ? parseInt(minSettings.value) : 15;
+            lockedUntil = new Date(Date.now() + lockoutMins * 60000).toISOString();
+        }
+        await db.run('UPDATE users SET failed_attempts = ?, locked_until = ? WHERE id = ?', [attempts, lockedUntil, user.id]);
+        res.status(401).json({ error: lockedUntil ? 'Account locked due to too many failed attempts.' : 'Invalid credentials' }); 
+    }
 });
 
 app.put('/api/user/profile', authenticate, async (req, res) => {
     const { displayName, newPassword } = req.body;
-    if (displayName) {
-        await db.run('UPDATE users SET display_name = ? WHERE id = ?', [displayName, req.userId]);
-    }
+    if (displayName) await db.run('UPDATE users SET display_name = ? WHERE id = ?', [displayName, req.userId]);
     if (newPassword) {
         const hash = await bcrypt.hash(newPassword, 10);
         await db.run('UPDATE users SET password = ? WHERE id = ?', [hash, req.userId]);
+        
+        // Auto-cleanup the temporary credentials file once the admin changes their password
+        if (req.userRole === 'admin' && fs.existsSync(ADMIN_CRED_FILE)) {
+            fs.unlinkSync(ADMIN_CRED_FILE);
+        }
     }
     const user = await db.get('SELECT username, role, display_name FROM users WHERE id = ?', [req.userId]);
     res.json({ success: true, name: user.display_name });
@@ -120,7 +175,7 @@ app.get('/api/family/grid', authenticate, async (req, res) => {
 });
 
 app.post('/api/family/create', [authenticate, familyLimiter], async (req, res) => {
-    if (req.userRole !== 'parent') return res.status(403).json({error: 'Not a parent'});
+    if (req.userRole !== 'parent' && req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
     const me = await db.get('SELECT family_id FROM users WHERE id = ?', [req.userId]);
     const count = await db.get('SELECT COUNT(*) as c FROM users WHERE family_id = ?', [me.family_id]);
     if (count.c > 15) return res.status(400).json({ error: 'Family size limit reached.' });
@@ -142,7 +197,7 @@ app.post('/api/family/create', [authenticate, familyLimiter], async (req, res) =
 });
 
 app.post('/api/family/link', authenticate, async (req, res) => {
-    if (req.userRole !== 'parent') return res.status(403).json({error: 'Not a parent'});
+    if (req.userRole !== 'parent' && req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
     const me = await db.get('SELECT family_id FROM users WHERE id = ?', [req.userId]);
     const targetUsername = (req.body.username || '').toLowerCase();
     const target = await db.get('SELECT id FROM users WHERE LOWER(username) = ? AND link_code = ?', [targetUsername, req.body.linkCode]);
@@ -152,7 +207,7 @@ app.post('/api/family/link', authenticate, async (req, res) => {
 });
 
 app.post('/api/family/reorder', authenticate, async (req, res) => {
-    if (req.userRole !== 'parent') return res.status(403).json({error: 'Not a parent'});
+    if (req.userRole !== 'parent' && req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
     const { order } = req.body;
     for (let i = 0; i < order.length; i++) {
         await db.run('UPDATE users SET sort_order = ? WHERE id = ? AND family_id = (SELECT family_id FROM users WHERE id = ?)', [i, order[i], req.userId]);
@@ -170,13 +225,19 @@ app.post('/api/toggle/:targetId', authenticate, async (req, res) => {
 
 app.get('/api/admin/users', authenticate, async (req, res) => {
     if (req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
-    res.json(await db.all(`SELECT id, username, display_name, role, is_suspended FROM users WHERE role != 'admin'`));
+    res.json(await db.all(`SELECT id, username, display_name, role, is_suspended, failed_attempts, locked_until FROM users`));
 });
 
 app.post('/api/admin/suspend/:id', authenticate, async (req, res) => {
     if (req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
     const target = await db.get('SELECT is_suspended FROM users WHERE id = ?', [req.params.id]);
     await db.run('UPDATE users SET is_suspended = ? WHERE id = ?', [target.is_suspended ? 0 : 1, req.params.id]);
+    res.json({ success: true });
+});
+
+app.post('/api/admin/role/:id', authenticate, async (req, res) => {
+    if (req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
+    await db.run('UPDATE users SET role = ? WHERE id = ?', [req.body.role, req.params.id]);
     res.json({ success: true });
 });
 
