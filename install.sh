@@ -13,7 +13,7 @@ fi
 
 echo "Installing System Dependencies..."
 apt-get update
-apt-get install -y curl sqlite3 nginx git python3-certbot-nginx
+apt-get install -y curl sqlite3 nginx git python3-certbot-nginx openssl
 curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
 apt-get install -y nodejs
 npm install -g pm2
@@ -282,11 +282,12 @@ export default function App() {
   useEffect(() => {
     if (token) {
         fetch('/api/weeks', { headers: { Authorization: `Bearer ${token}` } })
-            .then(r => r.json())
+            .then(r => { if (!r.ok) { hardReset(); throw new Error('Auth failed'); } return r.json(); })
             .then(data => {
                 setWeeks(data);
                 if (data.length > 0 && !selectedWeek) setSelectedWeek(data[0].id);
-            });
+            })
+            .catch(() => {});
     }
   }, [token]);
 
@@ -488,17 +489,32 @@ mkdir -p ../api/public
 cp -r dist/* ../api/public/
 
 # ==========================================
-# NGINX & PM2 SETUP
+# SSL & NGINX SETUP
 # ==========================================
-echo "Configuring Nginx Reverse Proxy..."
-SERVER_NAME=$DOMAIN_NAME
-if [ "$DOMAIN_NAME" == "local" ]; then SERVER_NAME="_"; fi
+echo "Configuring SSL and Nginx..."
+
+# Generate a fallback self-signed certificate so Nginx always has HTTPS available locally
+mkdir -p /etc/ssl/private /etc/ssl/certs
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+    -keyout /etc/ssl/private/nginx-selfsigned.key \
+    -out /etc/ssl/certs/nginx-selfsigned.crt \
+    -subj "/CN=${DOMAIN_NAME:-localhost}" 2>/dev/null
 
 cat << EOF > /etc/nginx/sites-available/microbiome
 server {
-    listen 80;
-    server_name $SERVER_NAME;
-    
+    listen 80 default_server;
+    server_name _;
+    # Force HTTP to HTTPS redirect
+    return 301 https://\$host\$request_uri;
+}
+
+server {
+    listen 443 ssl default_server;
+    server_name _;
+
+    ssl_certificate /etc/ssl/certs/nginx-selfsigned.crt;
+    ssl_certificate_key /etc/ssl/private/nginx-selfsigned.key;
+
     location /api/ {
         proxy_pass http://localhost:3001;
         proxy_http_version 1.1;
@@ -519,8 +535,10 @@ ln -sf /etc/nginx/sites-available/microbiome /etc/nginx/sites-enabled/
 systemctl restart nginx
 
 if [ "$DOMAIN_NAME" != "local" ]; then
-    echo "Provisioning SSL Certificate..."
-    certbot --nginx -d $DOMAIN_NAME -m$ADMIN_EMAIL --non-interactive --agree-tos --redirect
+    echo "Attempting to provision Let's Encrypt SSL Certificate via Certbot..."
+    # --keep-until-expiring prevents hitting rate limits if the cert exists.
+    # We quote "$ADMIN_EMAIL" to prevent AssertionError crashes on empty or special character inputs.
+    certbot --nginx -d "$DOMAIN_NAME" -m "$ADMIN_EMAIL" --non-interactive --agree-tos --redirect --keep-until-expiring || echo "Certbot encountered an issue. Falling back to the Self-Signed cert for HTTPS access."
 fi
 
 echo "Starting Application Service..."
