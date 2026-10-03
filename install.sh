@@ -491,26 +491,27 @@ cp -r dist/* ../api/public/
 # ==========================================
 # SSL & NGINX SETUP
 # ==========================================
-echo "Configuring SSL and Nginx..."
+echo "Configuring SSL and Nginx Baseline..."
 
-# Generate a fallback self-signed certificate so Nginx always has HTTPS available locally
 mkdir -p /etc/ssl/private /etc/ssl/certs
 openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
     -keyout /etc/ssl/private/nginx-selfsigned.key \
     -out /etc/ssl/certs/nginx-selfsigned.crt \
     -subj "/CN=${DOMAIN_NAME:-localhost}" 2>/dev/null
 
+SERVER_NAME=$DOMAIN_NAME
+if [ "$DOMAIN_NAME" == "local" ]; then SERVER_NAME="_"; fi
+
 cat << EOF > /etc/nginx/sites-available/microbiome
 server {
     listen 80 default_server;
-    server_name _;
-    # Force HTTP to HTTPS redirect
+    server_name $SERVER_NAME;
     return 301 https://\$host\$request_uri;
 }
 
 server {
     listen 443 ssl default_server;
-    server_name _;
+    server_name $SERVER_NAME;
 
     ssl_certificate /etc/ssl/certs/nginx-selfsigned.crt;
     ssl_certificate_key /etc/ssl/private/nginx-selfsigned.key;
@@ -536,9 +537,7 @@ systemctl restart nginx
 
 if [ "$DOMAIN_NAME" != "local" ]; then
     echo "Attempting to provision Let's Encrypt SSL Certificate via Certbot..."
-    # --keep-until-expiring prevents hitting rate limits if the cert exists.
-    # We quote "$ADMIN_EMAIL" to prevent AssertionError crashes on empty or special character inputs.
-    certbot --nginx -d "$DOMAIN_NAME" -m "$ADMIN_EMAIL" --non-interactive --agree-tos --redirect --keep-until-expiring || echo "Certbot encountered an issue. Falling back to the Self-Signed cert for HTTPS access."
+    certbot --nginx -d "$DOMAIN_NAME" -m "$ADMIN_EMAIL" --non-interactive --agree-tos --keep-until-expiring || echo "Certbot skipped/failed. Retaining self-signed baseline."
 fi
 
 echo "Starting Application Service..."
