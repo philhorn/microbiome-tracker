@@ -217,13 +217,32 @@ export default function App() {
               ))}
             </tr>
           </thead>
-          <tbody>
+<tbody>
             {defaultFoods.map(food => (
               <tr key={food}>
                 <td style={{ position: 'sticky', left: 0, background: 'white', padding: '10px 12px', borderBottom: '1px solid #f1f5f9', borderRight: '2px solid #cbd5e1', textAlign: 'left', zIndex: 10, fontWeight: '500' }}>{food}</td>
                 {familyMembers.map((m, idx) => (
-                  <td key={m.id} style={{ padding: '10px', background: columnColors[idx % columnColors.length], borderBottom: '1px solid #f1f5f9', borderRight: '1px solid #e2e8f0' }}>
-                    <input type="checkbox" checked={gridData[m.id]?.includes(food) || false} onChange={() => handleToggle(m.id, food)} style={{ width: '22px', height: '22px', cursor: 'pointer' }} />
+                  <td 
+                    key={m.id} 
+                    onClick={() => handleToggle(m.id, food)}
+                    style={{ 
+                      padding: '10px', 
+                      background: columnColors[idx % columnColors.length], 
+                      borderBottom: '1px solid #f1f5f9', 
+                      borderRight: '1px solid #e2e8f0',
+                      cursor: 'pointer' 
+                    }}
+                  >
+                    <input 
+                      type="checkbox" 
+                      checked={gridData[m.id]?.includes(food) || false} 
+                      readOnly
+                      style={{ 
+                        width: '22px', 
+                        height: '22px', 
+                        pointerEvents: 'none' 
+                      }} 
+                    />
                   </td>
                 ))}
               </tr>
