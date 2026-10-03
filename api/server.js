@@ -19,7 +19,6 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Security: Rate Limiters to stop bots from crashing the server
 const registerLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 10, message: { error: 'Too many accounts created from this IP. Try again in an hour.' } });
 const familyLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 20, message: { error: 'Family creation limit reached.' } });
 
@@ -32,7 +31,7 @@ let db;
         CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, week_id INTEGER, food_item TEXT, FOREIGN KEY(user_id) REFERENCES users(id));
         INSERT INTO active_week (id, week_start_date) SELECT 1, date('now', 'weekday 1', '-7 days') WHERE NOT EXISTS (SELECT 1 FROM active_week WHERE id = 1);
     `);
-    try { await db.exec("ALTER TABLE users ADD COLUMN is_suspended INTEGER DEFAULT 0;"); } catch (e) { /* Column exists */ }
+    try { await db.exec("ALTER TABLE users ADD COLUMN is_suspended INTEGER DEFAULT 0;"); } catch (e) {}
 })();
 
 const authenticate = (req, res, next) => {
@@ -75,6 +74,19 @@ app.post('/api/login', async (req, res) => {
     } else { res.status(401).json({ error: 'Invalid credentials' }); }
 });
 
+app.put('/api/user/profile', authenticate, async (req, res) => {
+    const { displayName, newPassword } = req.body;
+    if (displayName) {
+        await db.run('UPDATE users SET display_name = ? WHERE id = ?', [displayName, req.userId]);
+    }
+    if (newPassword) {
+        const hash = await bcrypt.hash(newPassword, 10);
+        await db.run('UPDATE users SET password = ? WHERE id = ?', [hash, req.userId]);
+    }
+    const user = await db.get('SELECT username, role, display_name FROM users WHERE id = ?', [req.userId]);
+    res.json({ success: true, name: user.display_name });
+});
+
 app.post('/api/user/upgrade', authenticate, async (req, res) => {
     if (req.userRole !== 'user') return res.status(400).json({ error: 'Already upgraded' });
     await db.run("UPDATE users SET role = 'parent' WHERE id = ?", [req.userId]);
@@ -110,13 +122,11 @@ app.get('/api/family/grid', authenticate, async (req, res) => {
 app.post('/api/family/create', [authenticate, familyLimiter], async (req, res) => {
     if (req.userRole !== 'parent') return res.status(403).json({error: 'Not a parent'});
     const me = await db.get('SELECT family_id FROM users WHERE id = ?', [req.userId]);
-    
     const count = await db.get('SELECT COUNT(*) as c FROM users WHERE family_id = ?', [me.family_id]);
     if (count.c > 15) return res.status(400).json({ error: 'Family size limit reached.' });
 
     const rawUsername = req.body.username;
     if (!rawUsername) return res.status(400).json({ error: 'Username required' });
-    
     const lowerUsername = rawUsername.toLowerCase();
     const displayName = req.body.displayName || rawUsername;
     const hash = await bcrypt.hash(req.body.password, 10);
@@ -158,7 +168,6 @@ app.post('/api/toggle/:targetId', authenticate, async (req, res) => {
     res.json({ success: true });
 });
 
-// Admin Routes
 app.get('/api/admin/users', authenticate, async (req, res) => {
     if (req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
     res.json(await db.all(`SELECT id, username, display_name, role, is_suspended FROM users WHERE role != 'admin'`));
