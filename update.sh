@@ -10,6 +10,7 @@ echo "Rebuilding Frontend..."
 cd client
 npm install
 npm run build
+mkdir -p ../api/public
 cp -r dist/* ../api/public/
 
 echo "Restarting Backend Service..."
