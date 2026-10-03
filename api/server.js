@@ -36,12 +36,10 @@ let db;
         INSERT OR IGNORE INTO settings (key, value) VALUES ('max_attempts', '5'), ('lockout_mins', '15');
     `);
     
-    // Schema updates
     try { await db.exec("ALTER TABLE users ADD COLUMN is_suspended INTEGER DEFAULT 0;"); } catch (e) {}
     try { await db.exec("ALTER TABLE users ADD COLUMN failed_attempts INTEGER DEFAULT 0;"); } catch (e) {}
     try { await db.exec("ALTER TABLE users ADD COLUMN locked_until TEXT;"); } catch (e) {}
 
-    // Secure Admin Bootstrap
     const adminExists = await db.get("SELECT 1 FROM users WHERE role = 'admin'");
     if (!adminExists) {
         const tempPassword = crypto.randomBytes(6).toString('hex');
@@ -50,14 +48,8 @@ let db;
         
         const credText = `INITIAL SYSTEM SETUP\n--------------------\nUsername: admin\nTemporary Password: ${tempPassword}\n\nPlease log into the web interface and change this password immediately in the Profile tab. This file will be securely deleted once the password is changed.\n`;
         fs.writeFileSync(ADMIN_CRED_FILE, credText, { mode: 0o600 });
-        
-        console.log("=================================================");
-        console.log("INITIAL ADMIN ACCOUNT CREATED");
-        console.log(`Password saved to: ${ADMIN_CRED_FILE}`);
-        console.log("=================================================");
     }
     
-    // Secure the DB file permissions on the host OS
     try { fs.chmodSync(path.join(__dirname, 'database.sqlite'), 0o600); } catch(e) {}
 })();
 
@@ -132,11 +124,7 @@ app.put('/api/user/profile', authenticate, async (req, res) => {
     if (newPassword) {
         const hash = await bcrypt.hash(newPassword, 10);
         await db.run('UPDATE users SET password = ? WHERE id = ?', [hash, req.userId]);
-        
-        // Auto-cleanup the temporary credentials file once the admin changes their password
-        if (req.userRole === 'admin' && fs.existsSync(ADMIN_CRED_FILE)) {
-            fs.unlinkSync(ADMIN_CRED_FILE);
-        }
+        if (req.userRole === 'admin' && fs.existsSync(ADMIN_CRED_FILE)) fs.unlinkSync(ADMIN_CRED_FILE);
     }
     const user = await db.get('SELECT username, role, display_name FROM users WHERE id = ?', [req.userId]);
     res.json({ success: true, name: user.display_name });
@@ -163,7 +151,15 @@ app.get('/api/weeks', authenticate, async (req, res) => {
 
 app.get('/api/family/grid', authenticate, async (req, res) => {
     const weekId = req.query.weekId || (await db.get('SELECT MAX(id) as id FROM active_week')).id;
-    const me = await db.get('SELECT family_id FROM users WHERE id = ?', [req.userId]);
+    
+    let targetUserId = req.userId;
+    if (req.userRole === 'admin' && req.query.impersonate) {
+        targetUserId = parseInt(req.query.impersonate);
+    }
+
+    const me = await db.get('SELECT family_id FROM users WHERE id = ?', [targetUserId]);
+    if (!me) return res.json({ members: [], grid: {} });
+
     const members = await db.all('SELECT id, display_name as name, sort_order FROM users WHERE family_id = ? ORDER BY sort_order ASC, id ASC', [me.family_id]);
     const ids = members.map(f => f.id);
     const placeholders = ids.map(() => '?').join(',');

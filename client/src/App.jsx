@@ -21,36 +21,44 @@ export default function App() {
   const [role, setRole] = useState(localStorage.getItem('role'));
   const [myLinkCode, setMyLinkCode] = useState(localStorage.getItem('linkCode'));
   const [myName, setMyName] = useState(localStorage.getItem('name') || '');
+  const [myUsername, setMyUsername] = useState(localStorage.getItem('username') || '');
   
   const [currentView, setCurrentView] = useState('tracker'); 
   const [searchTerm, setSearchTerm] = useState('');
   
+  // Auth Form State
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
   const [isParentReg, setIsParentReg] = useState(false);
   
+  // Settings & Linking
   const [profileName, setProfileName] = useState(myName);
   const [profilePass, setProfilePass] = useState('');
-  
   const [createUsername, setCreateUsername] = useState('');
   const [createDisplayName, setCreateDisplayName] = useState('');
   const [createPassword, setCreatePassword] = useState('');
   const [linkUsername, setLinkUsername] = useState('');
   const [linkCodeInput, setLinkCodeInput] = useState('');
   
+  // Core App Data
   const [weeks, setWeeks] = useState([]);
   const [selectedWeek, setSelectedWeek] = useState(null);
   const [familyMembers, setFamilyMembers] = useState([]);
   const [gridData, setGridData] = useState({});
   const [adminUsers, setAdminUsers] = useState([]);
+  
+  // UI States
   const [isLoginView, setIsLoginView] = useState(true);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
-
   const [collapsedCats, setCollapsedCats] = useState({});
   const [undoMemory, setUndoMemory] = useState({});
-  
   const [setupNotice, setSetupNotice] = useState(false);
+  
+  // Column Resizer & Impersonation
+  const [colWidths, setColWidths] = useState({});
+  const [impersonateId, setImpersonateId] = useState(null);
+  const [impersonateName, setImpersonateName] = useState(null);
 // --- END SECTION 2 ---
 
 
@@ -81,12 +89,15 @@ export default function App() {
         .then(d => setAdminUsers(Array.isArray(d) ? d : []))
         .catch(hardReset);
     } else {
-      fetch(`/api/family/grid?weekId=${selectedWeek}`, { headers: { Authorization: `Bearer ${token}` } })
+      let url = `/api/family/grid?weekId=${selectedWeek}`;
+      if (impersonateId) url += `&impersonate=${impersonateId}`;
+
+      fetch(url, { headers: { Authorization: `Bearer ${token}` } })
         .then(r => r.ok ? r.json() : hardReset())
         .then(d => { if (d && !d.error) { setFamilyMembers(d.members || []); setGridData(d.grid || {}); } })
         .catch(hardReset);
     }
-  }, [token, role, selectedWeek, currentView, refreshTrigger]);
+  }, [token, role, selectedWeek, currentView, refreshTrigger, impersonateId]);
 // --- END SECTION 3 ---
 
 
@@ -101,7 +112,9 @@ export default function App() {
       if (data.token) {
         localStorage.setItem('token', data.token); localStorage.setItem('role', data.role); 
         localStorage.setItem('linkCode', data.link_code); localStorage.setItem('name', data.name);
-        setToken(data.token); setRole(data.role); setMyLinkCode(data.link_code); setMyName(data.name); setProfileName(data.name);
+        localStorage.setItem('username', data.username);
+        setToken(data.token); setRole(data.role); setMyLinkCode(data.link_code); 
+        setMyName(data.name); setProfileName(data.name); setMyUsername(data.username);
       } else if (!isLoginView && data.success) {
         setIsLoginView(true); alert("Registered! Please log in.");
       } else { alert(data.error); }
@@ -213,6 +226,25 @@ export default function App() {
         await Promise.all(ids.map(id => fetch(`/api/toggle/${id}`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ item, checked: finalCheckState, weekId: selectedWeek }) })));
     }
   };
+
+  const startResize = (e, id) => {
+    const startX = e.type.includes('mouse') ? e.pageX : e.touches[0].pageX;
+    const startWidth = colWidths[id] || 130;
+    const onMove = (moveEvent) => {
+        const currentX = moveEvent.type.includes('mouse') ? moveEvent.pageX : moveEvent.touches[0].pageX;
+        setColWidths(prev => ({ ...prev, [id]: Math.max(90, startWidth + (currentX - startX)) }));
+    };
+    const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        document.removeEventListener('touchmove', onMove);
+        document.removeEventListener('touchend', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    document.addEventListener('touchmove', onMove, { passive: false });
+    document.addEventListener('touchend', onUp);
+  };
 // --- END SECTION 4 ---
 
 
@@ -257,31 +289,40 @@ export default function App() {
         .form-btn { padding: 8px 16px; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; flex: 1 1 100%; }
         .nav-btn { padding: 8px 16px; border: none; background: none; cursor: pointer; font-weight: bold; color: #64748b; border-bottom: 2px solid transparent; }
         .nav-btn.active { color: #2563eb; border-bottom: 2px solid #2563eb; }
-        .food-col { min-width: 220px; position: sticky; left: 0; z-index: 30; background: white; }
-        .person-col { min-width: 130px; position: sticky; top: 0; z-index: 20; resize: horizontal; overflow: hidden; }
+        
+        /* Table Layout Classes for Bulletproof Stickiness */
+        .table-container { max-height: 70vh; overflow: auto; border: 1px solid #e2e8f0; border-radius: 8px; background: white; -webkit-overflow-scrolling: touch; }
+        .food-col-header { position: sticky; top: 0; left: 0; z-index: 40; background: #f8fafc; border-bottom: 2px solid #cbd5e1; border-right: 2px solid #cbd5e1; text-align: left; min-width: 160px; }
+        .person-col-header { position: sticky; top: 0; z-index: 20; border-bottom: 2px solid #cbd5e1; border-right: 1px solid #e2e8f0; position: relative; }
+        .category-row { position: sticky; left: 0; z-index: 10; background: #e2e8f0; text-align: left; font-weight: bold; cursor: pointer; }
+        .food-cell { position: sticky; left: 0; z-index: 30; background: white; border-bottom: 1px solid #f1f5f9; border-right: 2px solid #cbd5e1; text-align: left; font-weight: 500; display: flex; justify-content: space-between; align-items: center; }
         .cell-pad { padding: 10px 12px; }
+        .drag-handle { position: absolute; right: 0; top: 0; bottom: 0; width: 15px; cursor: col-resize; z-index: 25; }
+        .drag-handle:hover { background: rgba(0,0,0,0.05); }
 
         @media (max-width: 768px) {
           .app-container { padding: 10px; }
           .form-group { flex-direction: column; align-items: stretch; }
           .form-input { flex: 1 1 100%; width: 100%; box-sizing: border-box; }
-          .food-col { min-width: 160px; font-size: 14px; }
-          .person-col { min-width: 90px; font-size: 14px; }
+          .food-col-header, .food-cell { min-width: 130px; font-size: 14px; }
           .cell-pad { padding: 8px 6px; font-size: 14px; }
-          .person-controls button { padding: 2px 6px; }
+          .drag-handle { width: 20px; } /* Wider touch target on mobile */
         }
       `}</style>
       
       {/* HEADER AND NAVIGATION */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '15px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px', flexWrap: 'wrap', gap: '15px' }}>
         <div>
-          <h2 style={{ margin: '0 0 8px 0' }}>Hi, {myName}</h2>
+          <h2 style={{ margin: '0 0 8px 0', display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+            Hi, {myName} 
+            <span style={{ fontSize: '14px', color: '#64748b', fontWeight: 'normal' }}>@{myUsername}</span>
+          </h2>
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
             <button className={`nav-btn ${currentView === 'tracker' ? 'active' : ''}`} onClick={() => setCurrentView('tracker')}>Tracker</button>
             {(role === 'parent' || role === 'admin') && <button className={`nav-btn ${currentView === 'family' ? 'active' : ''}`} onClick={() => setCurrentView('family')}>Family Settings</button>}
             <button className={`nav-btn ${currentView === 'profile' ? 'active' : ''}`} onClick={() => setCurrentView('profile')}>Profile</button>
             <button className={`nav-btn ${currentView === 'about' ? 'active' : ''}`} onClick={() => setCurrentView('about')}>About</button>
-            {role === 'admin' && <button className={`nav-btn ${currentView === 'admin' ? 'active' : ''}`} onClick={() => setCurrentView('admin')}>Admin</button>}
+            {role === 'admin' && <button className={`nav-btn ${currentView === 'admin' ? 'active' : ''}`} onClick={() => { setCurrentView('admin'); setImpersonateId(null); setImpersonateName(null); }}>Admin</button>}
           </div>
         </div>
         <button onClick={hardReset} style={{ padding: '8px 16px', background: '#e2e8f0', color: '#334155', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>Log Out</button>
@@ -315,7 +356,7 @@ export default function App() {
 
           <div style={{ background: '#fee2e2', padding: '20px', borderRadius: '8px', border: '1px solid #fca5a5' }}>
             <h3 style={{ marginTop: 0, color: '#991b1b' }}>Danger Zone</h3>
-            <div style={{ display: 'flex', gap: '10px' }}>
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
               {role === 'user' && <button onClick={handleUpgrade} style={{ padding: '8px 12px', background: '#8b5cf6', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Upgrade to Family Manager</button>}
               <button onClick={handleDeleteSelf} style={{ padding: '8px 12px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Delete My Account</button>
             </div>
@@ -326,10 +367,25 @@ export default function App() {
       {/* VIEW: FAMILY MANAGER */}
       {currentView === 'family' && (role === 'parent' || role === 'admin') && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '800px' }}>
+          
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fef3c7', padding: '15px', borderRadius: '8px', border: '1px solid #fcd34d' }}>
             <span style={{ fontSize: '16px' }}>Your Family Connection PIN:</span>
             <strong style={{ fontSize: '24px', letterSpacing: '2px' }}>{myLinkCode}</strong>
           </div>
+
+          <div style={{ background: 'white', padding: '15px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+            <h4 style={{ marginTop: 0 }}>Manage Family Order</h4>
+            {familyMembers.map((m, idx) => (
+              <div key={m.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px', borderBottom: '1px solid #f1f5f9' }}>
+                <span style={{ fontWeight: '500' }}>{m.name}</span>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button onClick={() => shiftColumn(idx, -1)} disabled={idx === 0} style={{ padding: '4px 12px', cursor: idx === 0 ? 'not-allowed' : 'pointer' }}>Up</button>
+                  <button onClick={() => shiftColumn(idx, 1)} disabled={idx === familyMembers.length - 1} style={{ padding: '4px 12px', cursor: idx === familyMembers.length - 1 ? 'not-allowed' : 'pointer' }}>Down</button>
+                </div>
+              </div>
+            ))}
+          </div>
+
           <form onSubmit={createMember} className="form-group">
             <strong style={{ width: '100%' }}>Create & Add New Family Member:</strong>
             <input type="text" placeholder="Username (Login ID)" value={createUsername} onChange={e => setCreateUsername(e.target.value)} required className="form-input"/>
@@ -337,6 +393,7 @@ export default function App() {
             <input type="password" placeholder="Password" value={createPassword} onChange={e => setCreatePassword(e.target.value)} required className="form-input"/>
             <button type="submit" className="form-btn" style={{ background: '#2563eb' }}>Create Account</button>
           </form>
+          
           <form onSubmit={linkUser} className="form-group">
             <strong style={{ width: '100%' }}>Link Existing Account to Family:</strong>
             <input type="text" placeholder="Their Username" value={linkUsername} onChange={e => setLinkUsername(e.target.value)} required className="form-input"/>
@@ -366,10 +423,9 @@ export default function App() {
                 <td style={{ padding: '12px' }}>
                     {u.is_suspended ? 'Suspended' : (u.locked_until && new Date(u.locked_until) > new Date() ? 'Locked (Brute Force)' : 'Active')}
                 </td>
-                <td style={{ padding: '12px', display: 'flex', gap: '8px' }}>
-                  <button onClick={() => adminAction(u.id, 'suspend')} disabled={u.id === 1} style={{ padding: '6px 10px', background: u.is_suspended ? '#10b981' : '#f59e0b', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
-                    {u.is_suspended ? 'Unsuspend' : 'Suspend'}
-                  </button>
+                <td style={{ padding: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  <button onClick={() => { setImpersonateId(u.id); setImpersonateName(u.display_name); setCurrentView('tracker'); }} style={{ padding: '6px 10px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Impersonate</button>
+                  <button onClick={() => adminAction(u.id, 'suspend')} disabled={u.id === 1} style={{ padding: '6px 10px', background: u.is_suspended ? '#10b981' : '#f59e0b', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>{u.is_suspended ? 'Unsuspend' : 'Suspend'}</button>
                   <button onClick={() => adminAction(u.id, 'delete')} disabled={u.id === 1} style={{ padding: '6px 10px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Delete</button>
                 </td>
               </tr>
@@ -381,22 +437,32 @@ export default function App() {
       {/* VIEW: MAIN TRACKER GRID */}
       {currentView === 'tracker' && (role !== 'admin' || familyMembers.length > 0) && (
         <>
-          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '15px' }}>
-            <select value={selectedWeek || ''} onChange={(e) => setSelectedWeek(e.target.value)} style={{ padding: '8px', borderRadius: '4px', border: '1px solid #cbd5e1', background: 'white', fontWeight: 'bold' }}>
-              {weeks.map((w, idx) => <option key={w.id} value={w.id}>{idx === 0 ? "Current Week" : "Week of " + w.week_start_date}</option>)}
-            </select>
-            <input type="text" placeholder="Search foods..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="form-input" style={{ maxWidth: '300px' }}/>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', flexWrap: 'wrap', gap: '15px' }}>
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexGrow: 1 }}>
+              <select value={selectedWeek || ''} onChange={(e) => setSelectedWeek(e.target.value)} style={{ padding: '8px', borderRadius: '4px', border: '1px solid #cbd5e1', background: 'white', fontWeight: 'bold' }}>
+                {weeks.map((w, idx) => <option key={w.id} value={w.id}>{idx === 0 ? "Current Week" : "Week of " + w.week_start_date}</option>)}
+              </select>
+              <input type="text" placeholder="Search foods..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="form-input" style={{ maxWidth: '300px' }}/>
+            </div>
+            {impersonateId && (
+                <div style={{ background: '#fef08a', padding: '6px 12px', borderRadius: '4px', border: '1px solid #facc15', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <strong>Viewing as: {impersonateName}</strong>
+                    <button onClick={() => { setImpersonateId(null); setImpersonateName(null); }} style={{ padding: '2px 8px', background: 'white', border: '1px solid #ca8a04', borderRadius: '4px', cursor: 'pointer' }}>Stop</button>
+                </div>
+            )}
           </div>
           
-          <div style={{ maxHeight: '70vh', overflow: 'auto', border: '1px solid #e2e8f0', borderRadius: '8px', background: 'white', WebkitOverflowScrolling: 'touch' }}>
+          <div className="table-container">
             <table style={{ borderCollapse: 'separate', borderSpacing: 0, width: '100%', textAlign: 'center' }}>
               <thead>
                 <tr>
-                  <th className="food-col cell-pad" style={{ top: 0, background: '#f8fafc', borderBottom: '2px solid #cbd5e1', borderRight: '2px solid #cbd5e1', textAlign: 'left' }}>Food Item</th>
+                  <th className="food-col-header cell-pad">Food Item</th>
                   {familyMembers.map((m, idx) => (
-                    <th key={m.id} className="person-col cell-pad" style={{ background: columnColors[idx % columnColors.length], borderBottom: '2px solid #cbd5e1', borderRight: '1px solid #e2e8f0' }}>
+                    <th key={m.id} className="person-col-header cell-pad" style={{ background: columnColors[idx % columnColors.length], width: colWidths[m.id] || 130, minWidth: colWidths[m.id] || 130 }}>
                       <span style={{ fontWeight: 'bold' }}>{m.name}</span><br/>
                       <span style={{ fontSize: '0.85em', fontWeight: 'normal', color: '#64748b' }}>Score: {gridData[m.id]?.length || 0}/30</span>
+                      {/* Custom Drag Handle */}
+                      <div className="drag-handle" onMouseDown={e => startResize(e, m.id)} onTouchStart={e => startResize(e, m.id)} />
                     </th>
                   ))}
                 </tr>
@@ -405,7 +471,7 @@ export default function App() {
                 {Object.keys(filteredCategories).map(category => (
                   <React.Fragment key={category}>
                     <tr>
-                      <td colSpan={familyMembers.length + 1} onClick={() => setCollapsedCats({...collapsedCats, [category]: !collapsedCats[category]})} style={{ background: '#e2e8f0', padding: '8px 12px', textAlign: 'left', fontWeight: 'bold', position: 'sticky', left: 0, zIndex: 10, cursor: 'pointer' }}>
+                      <td colSpan={familyMembers.length + 1} className="category-row cell-pad" onClick={() => setCollapsedCats({...collapsedCats, [category]: !collapsedCats[category]})}>
                         {collapsedCats[category] ? '▶' : '▼'} {category}
                       </td>
                     </tr>
@@ -420,9 +486,9 @@ export default function App() {
 
                       return (
                       <tr key={food}>
-                        <td className="food-col cell-pad" style={{ borderBottom: '1px solid #f1f5f9', borderRight: '2px solid #cbd5e1', textAlign: 'left', fontWeight: '500', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <td className="food-cell cell-pad">
                           <span>{food}</span>
-                          {role === 'parent' && <button onClick={() => handleCheckAll(food, action)} style={{ fontSize: '12px', padding: '4px 8px', background: action === 'all' ? '#cbd5e1' : action === 'revert' ? '#fde047' : '#fca5a5', border: 'none', borderRadius: '4px', cursor: 'pointer', minWidth: '45px' }}>{allBtnText}</button>}
+                          {(role === 'parent' || impersonateId) && <button onClick={() => handleCheckAll(food, action)} style={{ fontSize: '12px', padding: '4px 8px', background: action === 'all' ? '#cbd5e1' : action === 'revert' ? '#fde047' : '#fca5a5', border: 'none', borderRadius: '4px', cursor: 'pointer', minWidth: '45px' }}>{allBtnText}</button>}
                         </td>
                         {familyMembers.map((m, idx) => (
                           <td key={m.id} className="cell-pad" onClick={() => handleToggle(m.id, food)} style={{ background: columnColors[idx % columnColors.length], borderBottom: '1px solid #f1f5f9', borderRight: '1px solid #e2e8f0', cursor: 'pointer' }}>
