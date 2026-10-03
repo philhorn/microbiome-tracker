@@ -6,8 +6,12 @@ echo "Pulling latest code from GitHub..."
 cd $APP_DIR
 git pull origin main
 
+echo "Installing Backend Dependencies..."
+cd api
+npm install
+
 echo "Rebuilding Frontend..."
-cd client
+cd ../client
 npm install
 npm run build
 mkdir -p ../api/public

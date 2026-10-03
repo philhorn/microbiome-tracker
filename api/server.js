@@ -8,6 +8,7 @@ import { open } from 'sqlite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
+import rateLimit from 'express-rate-limit';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -18,6 +19,10 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Security: Rate Limiters to stop bots from crashing the server
+const registerLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 10, message: { error: 'Too many accounts created from this IP. Try again in an hour.' } });
+const familyLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 20, message: { error: 'Family creation limit reached.' } });
+
 let db;
 (async () => {
     db = await open({ filename: path.join(__dirname, 'database.sqlite'), driver: sqlite3.Database });
@@ -27,18 +32,21 @@ let db;
         CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, week_id INTEGER, food_item TEXT, FOREIGN KEY(user_id) REFERENCES users(id));
         INSERT INTO active_week (id, week_start_date) SELECT 1, date('now', 'weekday 1', '-7 days') WHERE NOT EXISTS (SELECT 1 FROM active_week WHERE id = 1);
     `);
+    try { await db.exec("ALTER TABLE users ADD COLUMN is_suspended INTEGER DEFAULT 0;"); } catch (e) { /* Column exists */ }
 })();
 
 const authenticate = (req, res, next) => {
     const token = req.headers.authorization?.split(' ')[1];
     if (!token) return res.status(401).json({ error: 'Unauthorized' });
-    jwt.verify(token, SECRET, (err, decoded) => {
+    jwt.verify(token, SECRET, async (err, decoded) => {
         if (err) return res.status(403).json({ error: 'Forbidden' });
+        const user = await db.get('SELECT is_suspended FROM users WHERE id = ?', [decoded.id]);
+        if (!user || user.is_suspended) return res.status(403).json({ error: 'Account is suspended or deleted.' });
         req.userId = decoded.id; req.userRole = decoded.role; next();
     });
 };
 
-app.post('/api/register', async (req, res) => {
+app.post('/api/register', registerLimiter, async (req, res) => {
     const rawUsername = req.body.username;
     if (!rawUsername) return res.status(400).json({ error: 'Username required' });
     const lowerUsername = rawUsername.toLowerCase();
@@ -54,7 +62,7 @@ app.post('/api/register', async (req, res) => {
         const result = await db.run('INSERT INTO users (username, password, role, display_name, link_code) VALUES (?, ?, ?, ?, ?)', [lowerUsername, hash, role, displayName, linkCode]); 
         await db.run('UPDATE users SET family_id = ? WHERE id = ?', [result.lastID, result.lastID]);
         res.json({ success: true }); 
-    } catch (e) { res.status(400).json({ error: 'Username already exists' }); }
+    } catch (e) { res.status(400).json({ error: 'Database error' }); }
 });
 
 app.post('/api/login', async (req, res) => {
@@ -62,8 +70,23 @@ app.post('/api/login', async (req, res) => {
     const lowerUsername = req.body.username.toLowerCase();
     const user = await db.get('SELECT * FROM users WHERE LOWER(username) = ?', [lowerUsername]);
     if (user && await bcrypt.compare(req.body.password, user.password)) {
+        if (user.is_suspended) return res.status(403).json({ error: 'Account suspended' });
         res.json({ token: jwt.sign({ id: user.id, username: user.username, role: user.role }, SECRET), id: user.id, username: user.username, role: user.role, name: user.display_name, link_code: user.link_code });
     } else { res.status(401).json({ error: 'Invalid credentials' }); }
+});
+
+app.post('/api/user/upgrade', authenticate, async (req, res) => {
+    if (req.userRole !== 'user') return res.status(400).json({ error: 'Already upgraded' });
+    await db.run("UPDATE users SET role = 'parent' WHERE id = ?", [req.userId]);
+    const user = await db.get('SELECT * FROM users WHERE id = ?', [req.userId]);
+    res.json({ success: true, token: jwt.sign({ id: user.id, username: user.username, role: user.role }, SECRET), role: user.role });
+});
+
+app.delete('/api/user/delete', authenticate, async (req, res) => {
+    if (req.userRole === 'admin') return res.status(403).json({ error: 'Cannot delete admin' });
+    await db.run('DELETE FROM logs WHERE user_id = ?', [req.userId]);
+    await db.run('DELETE FROM users WHERE id = ?', [req.userId]);
+    res.json({ success: true });
 });
 
 app.get('/api/weeks', authenticate, async (req, res) => {
@@ -75,20 +98,22 @@ app.get('/api/family/grid', authenticate, async (req, res) => {
     const weekId = req.query.weekId || (await db.get('SELECT MAX(id) as id FROM active_week')).id;
     const me = await db.get('SELECT family_id FROM users WHERE id = ?', [req.userId]);
     const members = await db.all('SELECT id, display_name as name, sort_order FROM users WHERE family_id = ? ORDER BY sort_order ASC, id ASC', [me.family_id]);
-    
     const ids = members.map(f => f.id);
     const placeholders = ids.map(() => '?').join(',');
     const logs = ids.length > 0 ? await db.all(`SELECT user_id, food_item FROM logs WHERE week_id = ? AND user_id IN (${placeholders})`, [weekId, ...ids]) : [];
     
-    const grid = {};
-    ids.forEach(id => grid[id] = []);
+    const grid = {}; ids.forEach(id => grid[id] = []);
     logs.forEach(l => grid[l.user_id].push(l.food_item));
     res.json({ members, grid });
 });
 
-app.post('/api/family/create', authenticate, async (req, res) => {
+app.post('/api/family/create', [authenticate, familyLimiter], async (req, res) => {
     if (req.userRole !== 'parent') return res.status(403).json({error: 'Not a parent'});
     const me = await db.get('SELECT family_id FROM users WHERE id = ?', [req.userId]);
+    
+    const count = await db.get('SELECT COUNT(*) as c FROM users WHERE family_id = ?', [me.family_id]);
+    if (count.c > 15) return res.status(400).json({ error: 'Family size limit reached.' });
+
     const rawUsername = req.body.username;
     if (!rawUsername) return res.status(400).json({ error: 'Username required' });
     
@@ -103,7 +128,7 @@ app.post('/api/family/create', authenticate, async (req, res) => {
     try {
         await db.run('INSERT INTO users (username, password, role, display_name, link_code, family_id) VALUES (?, ?, ?, ?, ?, ?)', [lowerUsername, hash, 'user', displayName, linkCode, me.family_id]);
         res.json({ success: true });
-    } catch (e) { res.status(400).json({ error: 'Username already exists' }); }
+    } catch (e) { res.status(400).json({ error: 'Error creating user' }); }
 });
 
 app.post('/api/family/link', authenticate, async (req, res) => {
@@ -112,7 +137,6 @@ app.post('/api/family/link', authenticate, async (req, res) => {
     const targetUsername = (req.body.username || '').toLowerCase();
     const target = await db.get('SELECT id FROM users WHERE LOWER(username) = ? AND link_code = ?', [targetUsername, req.body.linkCode]);
     if (!target) return res.status(404).json({error: 'Invalid username or connection PIN'});
-    
     await db.run('UPDATE users SET family_id = ? WHERE id = ?', [me.family_id, target.id]);
     res.json({ success: true });
 });
@@ -134,10 +158,24 @@ app.post('/api/toggle/:targetId', authenticate, async (req, res) => {
     res.json({ success: true });
 });
 
-app.get('/api/admin/dashboard', authenticate, async (req, res) => {
+// Admin Routes
+app.get('/api/admin/users', authenticate, async (req, res) => {
     if (req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
-    const weekId = req.query.weekId || (await db.get('SELECT MAX(id) as id FROM active_week')).id;
-    res.json(await db.all(`SELECT u.display_name as username, COUNT(l.id) as current_score FROM users u LEFT JOIN logs l ON u.id = l.user_id AND l.week_id = ? WHERE u.role != 'admin' GROUP BY u.id`, [weekId]));
+    res.json(await db.all(`SELECT id, username, display_name, role, is_suspended FROM users WHERE role != 'admin'`));
+});
+
+app.post('/api/admin/suspend/:id', authenticate, async (req, res) => {
+    if (req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
+    const target = await db.get('SELECT is_suspended FROM users WHERE id = ?', [req.params.id]);
+    await db.run('UPDATE users SET is_suspended = ? WHERE id = ?', [target.is_suspended ? 0 : 1, req.params.id]);
+    res.json({ success: true });
+});
+
+app.delete('/api/admin/delete/:id', authenticate, async (req, res) => {
+    if (req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
+    await db.run('DELETE FROM logs WHERE user_id = ?', [req.params.id]);
+    await db.run('DELETE FROM users WHERE id = ?', [req.params.id]);
+    res.json({ success: true });
 });
 
 cron.schedule('59 23 * * 0', async () => await db.run("INSERT INTO active_week (week_start_date) VALUES (date('now', 'weekday 1'))"));
