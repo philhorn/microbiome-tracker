@@ -18,7 +18,6 @@ const columnColors = ['#f0f9ff', '#f0fdf4', '#fefce8', '#fff1f2', '#f3e8ff', '#e
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem('token'));
   const [role, setRole] = useState(localStorage.getItem('role'));
-  const [myLinkCode, setMyLinkCode] = useState(localStorage.getItem('linkCode'));
   const [myName, setMyName] = useState(localStorage.getItem('name') || '');
   const [myUsername, setMyUsername] = useState(localStorage.getItem('username') || '');
   
@@ -33,15 +32,19 @@ export default function App() {
   const [profileName, setProfileName] = useState(myName);
   const [profilePass, setProfilePass] = useState('');
   
+  // Group States
+  const [groups, setGroups] = useState([]);
+  const [visibleGroupIds, setVisibleGroupIds] = useState([]);
+  const [newGroupName, setNewGroupName] = useState('');
+  
+  // Shared input states
   const [createUsername, setCreateUsername] = useState('');
   const [createDisplayName, setCreateDisplayName] = useState('');
   const [createPassword, setCreatePassword] = useState('');
-  const [linkUsername, setLinkUsername] = useState('');
   const [linkCodeInput, setLinkCodeInput] = useState('');
   
   const [weeks, setWeeks] = useState([]);
   const [selectedWeek, setSelectedWeek] = useState(null);
-  const [familyMembers, setFamilyMembers] = useState([]);
   const [gridData, setGridData] = useState({});
   const [adminUsers, setAdminUsers] = useState([]);
   const [sysSettings, setSysSettings] = useState({});
@@ -73,13 +76,9 @@ export default function App() {
       setRefreshTrigger(p => p + 1);
   };
 
-  useEffect(() => {
-      localStorage.setItem('colWidths', JSON.stringify(colWidths));
-  }, [colWidths]);
+  useEffect(() => { localStorage.setItem('colWidths', JSON.stringify(colWidths)); }, [colWidths]);
 
-  useEffect(() => {
-    fetch('/api/setup-status').then(r => r.json()).then(d => setSetupNotice(d.needsSetup)).catch(() => {});
-  }, [isLoginView]);
+  useEffect(() => { fetch('/api/setup-status').then(r => r.json()).then(d => setSetupNotice(d.needsSetup)).catch(() => {}); }, [isLoginView]);
 
   useEffect(() => {
     if (token) {
@@ -93,23 +92,36 @@ export default function App() {
   useEffect(() => {
     if (!token || !selectedWeek) return;
     if (role === 'admin' && currentView === 'admin') {
-      fetch('/api/admin/users', { headers: { Authorization: `Bearer ${token}` } })
-        .then(r => r.ok ? r.json() : hardReset())
-        .then(d => setAdminUsers(Array.isArray(d) ? d : []))
-        .catch(hardReset);
-      
-      fetch('/api/admin/settings', { headers: { Authorization: `Bearer ${token}` } })
-        .then(r => r.json())
-        .then(d => setSysSettings(d))
-        .catch(() => {});
+      fetch('/api/admin/users', { headers: { Authorization: `Bearer ${token}` } }).then(r => r.ok ? r.json() : hardReset()).then(d => setAdminUsers(Array.isArray(d) ? d : [])).catch(hardReset);
+      fetch('/api/admin/settings', { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json()).then(d => setSysSettings(d)).catch(() => {});
     } else {
-      const url = impersonatingId ? `/api/family/grid?weekId=${selectedWeek}&impersonate=${impersonatingId}` : `/api/family/grid?weekId=${selectedWeek}`;
+      const url = impersonatingId ? `/api/groups/grid?weekId=${selectedWeek}&impersonate=${impersonatingId}` : `/api/groups/grid?weekId=${selectedWeek}`;
       fetch(url, { headers: { Authorization: `Bearer ${token}` } })
         .then(r => r.ok ? r.json() : hardReset())
-        .then(d => { if (d && !d.error) { setFamilyMembers(d.members || []); setGridData(d.grid || {}); } })
-        .catch(hardReset);
+        .then(d => { 
+            if (d && !d.error) { 
+                setGroups(d.groups || []); 
+                setGridData(d.grid || {});
+                // Auto-select all groups if none are selected yet
+                if (visibleGroupIds.length === 0 && d.groups) {
+                    setVisibleGroupIds(d.groups.map(g => g.id));
+                }
+            } 
+        }).catch(hardReset);
     }
   }, [token, role, selectedWeek, currentView, refreshTrigger, impersonatingId]);
+
+  // Derived state: flattened, deduplicated users based on selected groups
+  const displayedUsers = [];
+  const seenIds = new Set();
+  groups.filter(g => visibleGroupIds.includes(g.id)).forEach(g => {
+      g.members.forEach(m => {
+          if (!seenIds.has(m.id)) {
+              seenIds.add(m.id);
+              displayedUsers.push(m);
+          }
+      });
+  });
 // --- END SECTION 3 ---
 
 // --- SECTION 4: HELPER FUNCTIONS ---
@@ -122,8 +134,8 @@ export default function App() {
       const data = await res.json();
       if (data.token) {
         localStorage.setItem('token', data.token); localStorage.setItem('role', data.role); 
-        localStorage.setItem('linkCode', data.link_code); localStorage.setItem('name', data.name); localStorage.setItem('username', data.username);
-        setToken(data.token); setRole(data.role); setMyLinkCode(data.link_code); setMyName(data.name); setMyUsername(data.username); setProfileName(data.name);
+        localStorage.setItem('name', data.name); localStorage.setItem('username', data.username);
+        setToken(data.token); setRole(data.role); setMyName(data.name); setMyUsername(data.username); setProfileName(data.name);
       } else if (!isLoginView && data.success) {
         setIsLoginView(true); alert("Registered! Please log in.");
       } else { alert(data.error); }
@@ -138,7 +150,7 @@ export default function App() {
   };
 
   const handleUpgrade = async () => {
-    if (!window.confirm("Convert this account to a Family Manager?")) return;
+    if (!window.confirm("Convert this account to a Group Manager?")) return;
     const res = await fetch('/api/user/upgrade', { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
     const data = await res.json();
     if (data.success) { localStorage.setItem('token', data.token); localStorage.setItem('role', data.role); setToken(data.token); setRole(data.role); }
@@ -152,10 +164,7 @@ export default function App() {
 
   const adminAction = async (id, action, payload) => {
     if (action === 'impersonate') {
-        setImpersonatingId(id);
-        setImpersonatingName(payload);
-        setCurrentView('tracker');
-        return;
+        setImpersonatingId(id); setImpersonatingName(payload); setCurrentView('tracker'); return;
     }
     const method = action === 'delete' ? 'DELETE' : 'POST';
     if (action === 'delete' && !window.confirm("Permanently delete this user?")) return;
@@ -174,42 +183,43 @@ export default function App() {
   const forceNewWeek = async () => {
       if (!window.confirm("Force create a new week right now?")) return;
       await fetch('/api/admin/force-week', { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
-      alert("New week created!");
-      setRefreshTrigger(p => p + 1);
+      alert("New week created!"); setRefreshTrigger(p => p + 1);
   };
 
-  const createMember = async (e) => {
-    e.preventDefault();
-    const res = await fetch('/api/family/create', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ username: createUsername.trim(), displayName: createDisplayName.trim() || createUsername.trim(), password: createPassword }) });
-    const data = await res.json();
-    if (data.success) { setCreateUsername(''); setCreateDisplayName(''); setCreatePassword(''); setRefreshTrigger(p => p + 1); alert("Created!"); } else alert(data.error);
+  const createGroup = async (e) => {
+      e.preventDefault();
+      const res = await fetch('/api/groups/create', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ name: newGroupName.trim() }) });
+      const data = await res.json();
+      if (data.success) { setNewGroupName(''); setRefreshTrigger(p => p + 1); alert("Group Created!"); } else alert(data.error);
   };
 
-  const linkUser = async (e) => {
+  const joinGroup = async (e) => {
+      e.preventDefault();
+      const res = await fetch('/api/groups/join', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ joinCode: linkCodeInput.trim() }) });
+      const data = await res.json();
+      if (data.success) { setLinkCodeInput(''); setRefreshTrigger(p => p + 1); alert("Joined Group!"); } else alert(data.error);
+  };
+
+  const createMemberInGroup = async (e, groupId) => {
     e.preventDefault();
-    const res = await fetch('/api/family/link', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ username: linkUsername.trim(), linkCode: linkCodeInput.trim() }) });
+    const res = await fetch(`/api/groups/${groupId}/create_user`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ username: createUsername.trim(), displayName: createDisplayName.trim() || createUsername.trim(), password: createPassword }) });
     const data = await res.json();
-    if (data.success) { setLinkUsername(''); setLinkCodeInput(''); setRefreshTrigger(p => p + 1); alert("Linked!"); } else alert(data.error);
+    if (data.success) { setCreateUsername(''); setCreateDisplayName(''); setCreatePassword(''); setRefreshTrigger(p => p + 1); alert("Account Created in Group!"); } else alert(data.error);
   };
 
   const saveMemberName = async (id) => {
     if (!editMemberName.trim()) return;
-    await fetch(`/api/family/member/${id}`, { 
-        method: 'PUT', 
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, 
-        body: JSON.stringify({ displayName: editMemberName.trim() }) 
-    });
-    setEditingMemberId(null);
-    setRefreshTrigger(p => p + 1);
+    await fetch(`/api/groups/member/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ displayName: editMemberName.trim() }) });
+    setEditingMemberId(null); setRefreshTrigger(p => p + 1);
   };
 
-  const shiftColumn = async (index, direction) => {
-    const newArr = [...familyMembers];
+  const shiftColumn = async (groupId, membersArray, index, direction) => {
+    const newArr = [...membersArray];
     if (direction === -1 && index > 0) [newArr[index - 1], newArr[index]] = [newArr[index], newArr[index - 1]];
     else if (direction === 1 && index < newArr.length - 1) [newArr[index + 1], newArr[index]] = [newArr[index], newArr[index + 1]];
     else return;
-    setFamilyMembers(newArr);
-    await fetch('/api/family/reorder', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ order: newArr.map(m => m.id) }) });
+    await fetch(`/api/groups/${groupId}/reorder`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ order: newArr.map(m => m.id) }) });
+    setRefreshTrigger(p => p + 1);
   };
 
   const handleToggle = async (memberId, item) => {
@@ -219,7 +229,7 @@ export default function App() {
   };
 
   const handleCheckAll = async (item, action) => {
-    const ids = familyMembers.map(m => m.id);
+    const ids = displayedUsers.map(m => m.id); // Contextually check ALL VISIBLE users
     const next = { ...gridData };
     let finalCheckState = true;
 
@@ -255,12 +265,7 @@ export default function App() {
         const newWidth = Math.max(80, startWidth + (moveEvent.clientX - startX));
         setColWidths(prev => ({ ...prev, [colId]: newWidth }));
     };
-    
-    const onMouseUp = () => {
-        document.removeEventListener('mousemove', onMouseMove);
-        document.removeEventListener('mouseup', onMouseUp);
-    };
-    
+    const onMouseUp = () => { document.removeEventListener('mousemove', onMouseMove); document.removeEventListener('mouseup', onMouseUp); };
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
   };
@@ -281,7 +286,7 @@ export default function App() {
         <input type="text" placeholder="Username" value={username} onChange={e => setUsername(e.target.value)} required style={{ padding: '10px', borderRadius: '4px', border: '1px solid #cbd5e1' }}/>
         {!isLoginView && <input type="text" placeholder="Display Name" value={displayName} onChange={e => setDisplayName(e.target.value)} required style={{ padding: '10px', borderRadius: '4px', border: '1px solid #cbd5e1' }}/>}
         <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} required style={{ padding: '10px', borderRadius: '4px', border: '1px solid #cbd5e1' }}/>
-        {!isLoginView && <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}><input type="checkbox" checked={isParentReg} onChange={e => setIsParentReg(e.target.checked)}/> Manager Account (Parent)</label>}
+        {!isLoginView && <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}><input type="checkbox" checked={isParentReg} onChange={e => setIsParentReg(e.target.checked)}/> Manager Account</label>}
         <button type="submit" style={{ padding: '10px', background: '#2563eb', color: 'white', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer' }}>Submit</button>
       </form>
       <p style={{ cursor: 'pointer', color: '#2563eb', marginTop: '16px', textAlign: 'center' }} onClick={() => setIsLoginView(!isLoginView)}>{isLoginView ? "Need an account? Register" : "Have an account? Login"}</p>
@@ -309,7 +314,7 @@ export default function App() {
         .person-col { position: sticky; top: 0; z-index: 20; }
         .top-left-corner { position: sticky; top: 0; left: 0; z-index: 40; background: #f8fafc; }
         
-        .cell-pad { padding: 10px 12px; }
+        .cell-pad { padding: 10px 12px; position: relative; }
         .drag-handle { position: absolute; right: 0; top: 0; width: 15px; height: 100%; cursor: col-resize; z-index: 25; }
         .drag-handle:hover { background: rgba(0,0,0,0.05); }
 
@@ -335,7 +340,7 @@ export default function App() {
 
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
             <button className={`nav-btn ${currentView === 'tracker' ? 'active' : ''}`} onClick={() => setCurrentView('tracker')}>Tracker</button>
-            {(role === 'parent' || role === 'admin') && <button className={`nav-btn ${currentView === 'family' ? 'active' : ''}`} onClick={() => setCurrentView('family')}>Family Settings</button>}
+            {(role === 'parent' || role === 'admin') && <button className={`nav-btn ${currentView === 'groups' ? 'active' : ''}`} onClick={() => setCurrentView('groups')}>Group Settings</button>}
             <button className={`nav-btn ${currentView === 'profile' ? 'active' : ''}`} onClick={() => setCurrentView('profile')}>Profile</button>
             <button className={`nav-btn ${currentView === 'about' ? 'active' : ''}`} onClick={() => setCurrentView('about')}>About</button>
             {role === 'admin' && <button className={`nav-btn ${currentView === 'admin' ? 'active' : ''}`} onClick={() => setCurrentView('admin')}>Admin</button>}
@@ -373,57 +378,70 @@ export default function App() {
           <div style={{ background: '#fee2e2', padding: '20px', borderRadius: '8px', border: '1px solid #fca5a5' }}>
             <h3 style={{ marginTop: 0, color: '#991b1b' }}>Danger Zone</h3>
             <div style={{ display: 'flex', gap: '10px' }}>
-              {role === 'user' && <button onClick={handleUpgrade} style={{ padding: '8px 12px', background: '#8b5cf6', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Upgrade to Family Manager</button>}
+              {role === 'user' && <button onClick={handleUpgrade} style={{ padding: '8px 12px', background: '#8b5cf6', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Upgrade to Group Manager</button>}
               <button onClick={handleDeleteSelf} style={{ padding: '8px 12px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Delete My Account</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* VIEW: FAMILY MANAGER */}
-      {currentView === 'family' && (role === 'parent' || role === 'admin') && (
+      {/* VIEW: GROUP MANAGER */}
+      {currentView === 'groups' && (role === 'parent' || role === 'admin') && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '800px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fef3c7', padding: '15px', borderRadius: '8px', border: '1px solid #fcd34d' }}>
-            <span style={{ fontSize: '16px' }}>Your Family Connection PIN:</span>
-            <strong style={{ fontSize: '24px', letterSpacing: '2px' }}>{myLinkCode}</strong>
-          </div>
-          <form onSubmit={createMember} className="form-group">
-            <strong style={{ width: '100%' }}>Create & Add New Family Member:</strong>
-            <input type="text" placeholder="Username (Login ID)" value={createUsername} onChange={e => setCreateUsername(e.target.value)} required className="form-input"/>
-            <input type="text" placeholder="Display Name" value={createDisplayName} onChange={e => setCreateDisplayName(e.target.value)} className="form-input"/>
-            <input type="password" placeholder="Password" value={createPassword} onChange={e => setCreatePassword(e.target.value)} required className="form-input"/>
-            <button type="submit" className="form-btn" style={{ background: '#2563eb' }}>Create Account</button>
-          </form>
-          <form onSubmit={linkUser} className="form-group">
-            <strong style={{ width: '100%' }}>Link Existing Account to Family:</strong>
-            <input type="text" placeholder="Their Username" value={linkUsername} onChange={e => setLinkUsername(e.target.value)} required className="form-input"/>
-            <input type="text" placeholder="Their 6-Digit PIN" value={linkCodeInput} onChange={e => setLinkCodeInput(e.target.value)} required className="form-input"/>
-            <button type="submit" className="form-btn" style={{ background: '#10b981' }}>Connect Account</button>
-          </form>
           
-          <div style={{ background: '#f8fafc', padding: '15px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-            <strong style={{ display: 'block', marginBottom: '10px' }}>Manage Family Order:</strong>
-            {familyMembers.map((m, idx) => (
-                <div key={m.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px', borderBottom: '1px solid #cbd5e1', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-                    {editingMemberId === m.id ? (
-                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                            <input type="text" value={editMemberName} onChange={(e) => setEditMemberName(e.target.value)} className="form-input" style={{ width: '150px', padding: '4px' }} />
-                            <button onClick={() => saveMemberName(m.id)} style={{ padding: '4px 8px', background: '#10b981', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Save</button>
-                            <button onClick={() => setEditingMemberId(null)} style={{ padding: '4px 8px', background: '#64748b', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Cancel</button>
-                        </div>
-                    ) : (
-                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                            <span style={{ fontWeight: 'bold' }}>{m.name}</span>
-                            <button onClick={() => { setEditingMemberId(m.id); setEditMemberName(m.name); }} style={{ padding: '2px 8px', background: '#e2e8f0', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' }}>Edit Name</button>
-                        </div>
-                    )}
-                    <div style={{ display: 'flex', gap: '4px' }}>
-                        <button onClick={() => shiftColumn(idx, -1)} style={{ padding: '4px 8px', cursor: 'pointer', border: '1px solid #cbd5e1', background: 'white', borderRadius: '4px' }}>Up</button>
-                        <button onClick={() => shiftColumn(idx, 1)} style={{ padding: '4px 8px', cursor: 'pointer', border: '1px solid #cbd5e1', background: 'white', borderRadius: '4px' }}>Down</button>
-                    </div>
-                </div>
-            ))}
+          {/* Top Actions: Create / Join Groups */}
+          <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
+              <form onSubmit={createGroup} className="form-group">
+                <strong style={{ width: '100%' }}>Create a New Group:</strong>
+                <input type="text" placeholder="Group Name (e.g. LTS Workspace)" value={newGroupName} onChange={e => setNewGroupName(e.target.value)} required className="form-input"/>
+                <button type="submit" className="form-btn" style={{ background: '#2563eb' }}>Create Group</button>
+              </form>
+              <form onSubmit={joinGroup} className="form-group">
+                <strong style={{ width: '100%' }}>Join Existing Group:</strong>
+                <input type="text" placeholder="Group PIN" value={linkCodeInput} onChange={e => setLinkCodeInput(e.target.value)} required className="form-input"/>
+                <button type="submit" className="form-btn" style={{ background: '#10b981' }}>Join Group</button>
+              </form>
           </div>
+
+          {/* Group Cards */}
+          {groups.map(g => (
+              <div key={g.id} style={{ background: 'white', padding: '15px', borderRadius: '8px', border: '2px solid #cbd5e1', marginBottom: '10px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px', marginBottom: '15px' }}>
+                      <h3 style={{ margin: 0 }}>{g.name}</h3>
+                      <span style={{ background: '#fef3c7', padding: '6px 12px', borderRadius: '4px', border: '1px solid #fcd34d' }}><strong>Group PIN:</strong> {g.join_code}</span>
+                  </div>
+                  
+                  <strong style={{ display: 'block', marginBottom: '10px' }}>Group Members:</strong>
+                  {g.members.map((m, idx) => (
+                    <div key={m.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '4px', marginBottom: '5px', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                        {editingMemberId === m.id ? (
+                            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                <input type="text" value={editMemberName} onChange={(e) => setEditMemberName(e.target.value)} className="form-input" style={{ width: '150px', padding: '4px' }} />
+                                <button onClick={() => saveMemberName(m.id)} style={{ padding: '4px 8px', background: '#10b981', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Save</button>
+                                <button onClick={() => setEditingMemberId(null)} style={{ padding: '4px 8px', background: '#64748b', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Cancel</button>
+                            </div>
+                        ) : (
+                            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                                <span style={{ fontWeight: 'bold' }}>{m.name}</span>
+                                <button onClick={() => { setEditingMemberId(m.id); setEditMemberName(m.name); }} style={{ padding: '2px 8px', background: '#e2e8f0', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' }}>Edit Name</button>
+                            </div>
+                        )}
+                        <div style={{ display: 'flex', gap: '4px' }}>
+                            <button onClick={() => shiftColumn(g.id, g.members, idx, -1)} style={{ padding: '4px 8px', cursor: 'pointer', border: '1px solid #cbd5e1', background: 'white', borderRadius: '4px' }}>Up</button>
+                            <button onClick={() => shiftColumn(g.id, g.members, idx, 1)} style={{ padding: '4px 8px', cursor: 'pointer', border: '1px solid #cbd5e1', background: 'white', borderRadius: '4px' }}>Down</button>
+                        </div>
+                    </div>
+                  ))}
+
+                  <form onSubmit={(e) => createMemberInGroup(e, g.id)} style={{ display: 'flex', gap: '8px', marginTop: '15px', padding: '10px', background: '#f1f5f9', borderRadius: '4px', flexWrap: 'wrap' }}>
+                      <strong style={{ width: '100%', fontSize: '14px', color: '#475569' }}>Create New Account in this Group:</strong>
+                      <input type="text" placeholder="Username (Login ID)" value={createUsername} onChange={e => setCreateUsername(e.target.value)} required className="form-input"/>
+                      <input type="text" placeholder="Display Name" value={createDisplayName} onChange={e => setCreateDisplayName(e.target.value)} className="form-input"/>
+                      <input type="password" placeholder="Password" value={createPassword} onChange={e => setCreatePassword(e.target.value)} required className="form-input"/>
+                      <button type="submit" className="form-btn" style={{ background: '#3b82f6' }}>Create</button>
+                  </form>
+              </div>
+          ))}
         </div>
       )}
 
@@ -440,7 +458,7 @@ export default function App() {
                   <td style={{ padding: '12px' }}>{u.id}</td>
                   <td style={{ padding: '12px' }}><strong>{u.display_name}</strong><br/><span style={{fontSize: '0.85em', color: '#64748b'}}>{u.username}</span></td>
                   <td style={{ padding: '12px' }}>
-                      <select value={u.role} onChange={(e) => adminAction(u.id, 'role', e.target.value)} disabled={u.id === 1} style={{ padding: '4px', borderRadius: '4px' }}>
+                      <select value={u.role} onChange={(e) => adminAction(u.id, 'role', e.target.value)} disabled={u.username === 'admin'} style={{ padding: '4px', borderRadius: '4px' }}>
                           <option value="user">User</option><option value="parent">Parent</option>
                           <option value="dietitian">Dietitian</option><option value="admin">Admin</option>
                       </select>
@@ -450,10 +468,10 @@ export default function App() {
                   </td>
                   <td style={{ padding: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                     <button onClick={() => adminAction(u.id, 'impersonate', u.display_name)} style={{ padding: '6px 10px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Impersonate</button>
-                    <button onClick={() => adminAction(u.id, 'suspend')} disabled={u.id === 1} style={{ padding: '6px 10px', background: u.is_suspended ? '#10b981' : '#f59e0b', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+                    <button onClick={() => adminAction(u.id, 'suspend')} disabled={u.username === 'admin'} style={{ padding: '6px 10px', background: u.is_suspended ? '#10b981' : '#f59e0b', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
                       {u.is_suspended ? 'Unsuspend' : 'Suspend'}
                     </button>
-                    <button onClick={() => adminAction(u.id, 'delete')} disabled={u.id === 1} style={{ padding: '6px 10px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Delete</button>
+                    <button onClick={() => adminAction(u.id, 'delete')} disabled={u.username === 'admin'} style={{ padding: '6px 10px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Delete</button>
                   </td>
                 </tr>
               ))}</tbody>
@@ -466,13 +484,8 @@ export default function App() {
                   <label style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                       <strong>Week Rollover Day:</strong>
                       <select value={sysSettings.rollover_day || '0'} onChange={e => saveSetting('rollover_day', e.target.value)} className="form-input" style={{ minWidth: '150px' }}>
-                          <option value="0">Sunday</option>
-                          <option value="1">Monday</option>
-                          <option value="2">Tuesday</option>
-                          <option value="3">Wednesday</option>
-                          <option value="4">Thursday</option>
-                          <option value="5">Friday</option>
-                          <option value="6">Saturday</option>
+                          <option value="0">Sunday</option><option value="1">Monday</option><option value="2">Tuesday</option>
+                          <option value="3">Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option>
                       </select>
                   </label>
                   <button onClick={forceNewWeek} style={{ padding: '8px 16px', background: '#eab308', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', height: 'fit-content' }}>Force Start New Week Now</button>
@@ -482,13 +495,28 @@ export default function App() {
       )}
 
       {/* VIEW: MAIN TRACKER GRID */}
-      {currentView === 'tracker' && (role !== 'admin' || familyMembers.length > 0 || impersonatingId) && (
+      {currentView === 'tracker' && (role !== 'admin' || displayedUsers.length > 0 || impersonatingId) && (
         <>
-          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '15px' }}>
+          <div style={{ display: 'flex', gap: '15px', alignItems: 'center', marginBottom: '15px', flexWrap: 'wrap' }}>
+            
+            {/* Group Visibility Toggles */}
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', flexGrow: 1 }}>
+                {groups.map(g => (
+                    <button 
+                        key={g.id} 
+                        onClick={() => setVisibleGroupIds(prev => prev.includes(g.id) ? prev.filter(id => id !== g.id) : [...prev, g.id])}
+                        style={{ padding: '6px 12px', borderRadius: '20px', cursor: 'pointer', border: 'none', fontWeight: 'bold', fontSize: '14px',
+                                 background: visibleGroupIds.includes(g.id) ? '#3b82f6' : '#e2e8f0', color: visibleGroupIds.includes(g.id) ? 'white' : '#64748b' }}
+                    >
+                        {visibleGroupIds.includes(g.id) ? '✓ ' : '+ '} {g.name}
+                    </button>
+                ))}
+            </div>
+
             <select value={selectedWeek || ''} onChange={(e) => setSelectedWeek(e.target.value)} style={{ padding: '8px', borderRadius: '4px', border: '1px solid #cbd5e1', background: 'white', fontWeight: 'bold' }}>
               {weeks.map((w, idx) => <option key={w.id} value={w.id}>{idx === 0 ? "Current Week" : "Week of " + w.week_start_date}</option>)}
             </select>
-            <input type="text" placeholder="Search foods..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="form-input" style={{ maxWidth: '300px' }}/>
+            <input type="text" placeholder="Search foods..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="form-input" style={{ maxWidth: '200px' }}/>
           </div>
           
           <div style={{ maxHeight: '70vh', overflow: 'auto', border: '1px solid #e2e8f0', borderRadius: '8px', background: 'white', WebkitOverflowScrolling: 'touch' }}>
@@ -499,7 +527,7 @@ export default function App() {
                     Food Item
                     <div className="drag-handle" onMouseDown={(e) => handleDrag(e, 'food', 160)} />
                   </th>
-                  {familyMembers.map((m, idx) => (
+                  {displayedUsers.map((m, idx) => (
                     <th key={m.id} className="person-col cell-pad" style={{ width: colWidths[m.id] || 90, minWidth: 80, maxWidth: colWidths[m.id] || 90, background: columnColors[idx % columnColors.length], borderBottom: '2px solid #cbd5e1', borderRight: '1px solid #e2e8f0' }}>
                       <span style={{ fontWeight: 'bold' }}>{m.name}</span><br/>
                       <span style={{ fontSize: '0.85em', fontWeight: 'normal', color: '#64748b' }}>Score: {gridData[m.id]?.length || 0}</span>
@@ -515,20 +543,20 @@ export default function App() {
                       <td onClick={() => setCollapsedCats({...collapsedCats, [category]: !collapsedCats[category]})} className="food-col cell-pad category-row" style={{ background: '#e2e8f0', borderBottom: '2px solid #cbd5e1', borderRight: '2px solid #cbd5e1', textAlign: 'left', fontWeight: 'bold', cursor: 'pointer' }}>
                         {collapsedCats[category] ? '▶' : '▼'} {category}
                       </td>
-                      {familyMembers.map((m, idx) => (
+                      {displayedUsers.map((m, idx) => (
                         <td key={m.id} className="cell-pad category-row" style={{ background: '#f1f5f9', color: '#94a3b8', fontSize: '0.85em', textAlign: 'center', borderBottom: '2px solid #cbd5e1', borderRight: '1px solid #cbd5e1', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                            {category}
                         </td>
                       ))}
                     </tr>
                     {!collapsedCats[category] && filteredCategories[category].map(food => {
-                      const checkedCount = familyMembers.filter(m => (gridData[m.id] || []).includes(food)).length;
+                      const checkedCount = displayedUsers.filter(m => (gridData[m.id] || []).includes(food)).length;
                       let allBtnText = "All";
                       let action = 'all';
                       let btnColor = '#cbd5e1';
-                      let hoverTitle = "Check everyone";
+                      let hoverTitle = "Check everyone visible";
 
-                      if (checkedCount === familyMembers.length) {
+                      if (displayedUsers.length > 0 && checkedCount === displayedUsers.length) {
                           if (undoMemory[food]) { 
                               allBtnText = "Revert"; 
                               action = 'revert'; 
@@ -538,7 +566,7 @@ export default function App() {
                               allBtnText = "Clear"; 
                               action = 'clear'; 
                               btnColor = '#fca5a5';
-                              hoverTitle = "Uncheck everyone";
+                              hoverTitle = "Uncheck everyone visible";
                           }
                       }
 
@@ -546,7 +574,7 @@ export default function App() {
                       <tr key={food}>
                         <td className="food-col cell-pad" style={{ borderBottom: '1px solid #f1f5f9', borderRight: '2px solid #cbd5e1', textAlign: 'left', fontWeight: '500', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <span>{food}</span>
-                          {(role === 'parent' || impersonatingId) && (
+                          {(role === 'parent' || impersonatingId) && displayedUsers.length > 0 && (
                               <button 
                                 onClick={() => handleCheckAll(food, action)} 
                                 title={hoverTitle}
@@ -556,7 +584,7 @@ export default function App() {
                               </button>
                           )}
                         </td>
-                        {familyMembers.map((m, idx) => (
+                        {displayedUsers.map((m, idx) => (
                           <td key={m.id} className="cell-pad" onClick={() => handleToggle(m.id, food)} style={{ background: columnColors[idx % columnColors.length], borderBottom: '1px solid #f1f5f9', borderRight: '1px solid #e2e8f0', cursor: 'pointer' }}>
                             <input type="checkbox" checked={gridData[m.id]?.includes(food) || false} readOnly style={{ width: '22px', height: '22px', pointerEvents: 'none' }} />
                           </td>
