@@ -54,6 +54,9 @@ export default function App() {
   const [impersonatingId, setImpersonatingId] = useState(null);
   const [impersonatingName, setImpersonatingName] = useState(null);
   
+  const [editingMemberId, setEditingMemberId] = useState(null);
+  const [editMemberName, setEditMemberName] = useState('');
+  
   const [colWidths, setColWidths] = useState(() => {
       const saved = localStorage.getItem('colWidths');
       return saved ? JSON.parse(saved) : {};
@@ -171,6 +174,17 @@ export default function App() {
     if (data.success) { setLinkUsername(''); setLinkCodeInput(''); setRefreshTrigger(p => p + 1); alert("Linked!"); } else alert(data.error);
   };
 
+  const saveMemberName = async (id) => {
+    if (!editMemberName.trim()) return;
+    await fetch(`/api/family/member/${id}`, { 
+        method: 'PUT', 
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, 
+        body: JSON.stringify({ displayName: editMemberName.trim() }) 
+    });
+    setEditingMemberId(null);
+    setRefreshTrigger(p => p + 1);
+  };
+
   const shiftColumn = async (index, direction) => {
     const newArr = [...familyMembers];
     if (direction === -1 && index > 0) [newArr[index - 1], newArr[index]] = [newArr[index], newArr[index - 1]];
@@ -278,7 +292,7 @@ export default function App() {
         .top-left-corner { position: sticky; top: 0; left: 0; z-index: 40; background: #f8fafc; }
         .category-row { position: sticky; left: 0; z-index: 10; }
         
-        .cell-pad { padding: 10px 12px; position: relative; }
+        .cell-pad { padding: 10px 12px; }
         .drag-handle { position: absolute; right: 0; top: 0; width: 15px; height: 100%; cursor: col-resize; z-index: 25; }
         .drag-handle:hover { background: rgba(0,0,0,0.05); }
 
@@ -373,11 +387,22 @@ export default function App() {
           <div style={{ background: '#f8fafc', padding: '15px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
             <strong style={{ display: 'block', marginBottom: '10px' }}>Manage Family Order:</strong>
             {familyMembers.map((m, idx) => (
-                <div key={m.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px', borderBottom: '1px solid #cbd5e1', alignItems: 'center' }}>
-                    <span>{m.name}</span>
-                    <div>
-                        <button onClick={() => shiftColumn(idx, -1)} style={{ padding: '4px 8px', marginRight: '4px', cursor: 'pointer' }}>Up</button>
-                        <button onClick={() => shiftColumn(idx, 1)} style={{ padding: '4px 8px', cursor: 'pointer' }}>Down</button>
+                <div key={m.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px', borderBottom: '1px solid #cbd5e1', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                    {editingMemberId === m.id ? (
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                            <input type="text" value={editMemberName} onChange={(e) => setEditMemberName(e.target.value)} className="form-input" style={{ width: '150px', padding: '4px' }} />
+                            <button onClick={() => saveMemberName(m.id)} style={{ padding: '4px 8px', background: '#10b981', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Save</button>
+                            <button onClick={() => setEditingMemberId(null)} style={{ padding: '4px 8px', background: '#64748b', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Cancel</button>
+                        </div>
+                    ) : (
+                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                            <span style={{ fontWeight: 'bold' }}>{m.name}</span>
+                            <button onClick={() => { setEditingMemberId(m.id); setEditMemberName(m.name); }} style={{ padding: '2px 8px', background: '#e2e8f0', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' }}>Edit Name</button>
+                        </div>
+                    )}
+                    <div style={{ display: 'flex', gap: '4px' }}>
+                        <button onClick={() => shiftColumn(idx, -1)} style={{ padding: '4px 8px', cursor: 'pointer', border: '1px solid #cbd5e1', background: 'white', borderRadius: '4px' }}>Up</button>
+                        <button onClick={() => shiftColumn(idx, 1)} style={{ padding: '4px 8px', cursor: 'pointer', border: '1px solid #cbd5e1', background: 'white', borderRadius: '4px' }}>Down</button>
                     </div>
                 </div>
             ))}

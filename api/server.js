@@ -1,3 +1,4 @@
+// --- SECTION 1: IMPORTS AND SETUP ---
 import express from 'express';
 import cors from 'cors';
 import bcrypt from 'bcrypt';
@@ -23,7 +24,9 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 const registerLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 10, message: { error: 'Too many accounts created from this IP. Try again in an hour.' } });
 const familyLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 20, message: { error: 'Family creation limit reached.' } });
+// --- END SECTION 1 ---
 
+// --- SECTION 2: DATABASE INITIALIZATION ---
 let db;
 (async () => {
     db = await open({ filename: path.join(__dirname, 'database.sqlite'), driver: sqlite3.Database });
@@ -49,10 +52,11 @@ let db;
         const credText = `INITIAL SYSTEM SETUP\n--------------------\nUsername: admin\nTemporary Password: ${tempPassword}\n\nPlease log into the web interface and change this password immediately in the Profile tab. This file will be securely deleted once the password is changed.\n`;
         fs.writeFileSync(ADMIN_CRED_FILE, credText, { mode: 0o600 });
     }
-    
     try { fs.chmodSync(path.join(__dirname, 'database.sqlite'), 0o600); } catch(e) {}
 })();
+// --- END SECTION 2 ---
 
+// --- SECTION 3: AUTH MIDDLEWARE ---
 const authenticate = (req, res, next) => {
     const token = req.headers.authorization?.split(' ')[1];
     if (!token) return res.status(401).json({ error: 'Unauthorized' });
@@ -63,7 +67,9 @@ const authenticate = (req, res, next) => {
         req.userId = decoded.id; req.userRole = decoded.role; next();
     });
 };
+// --- END SECTION 3 ---
 
+// --- SECTION 4: PUBLIC & AUTH ROUTES ---
 app.get('/api/setup-status', (req, res) => {
     res.json({ needsSetup: fs.existsSync(ADMIN_CRED_FILE) });
 });
@@ -117,7 +123,9 @@ app.post('/api/login', async (req, res) => {
         res.status(401).json({ error: lockedUntil ? 'Account locked due to too many failed attempts.' : 'Invalid credentials' }); 
     }
 });
+// --- END SECTION 4 ---
 
+// --- SECTION 5: USER & FAMILY ROUTES ---
 app.put('/api/user/profile', authenticate, async (req, res) => {
     const { displayName, newPassword } = req.body;
     if (displayName) await db.run('UPDATE users SET display_name = ? WHERE id = ?', [displayName, req.userId]);
@@ -151,14 +159,13 @@ app.get('/api/weeks', authenticate, async (req, res) => {
 
 app.get('/api/family/grid', authenticate, async (req, res) => {
     const weekId = req.query.weekId || (await db.get('SELECT MAX(id) as id FROM active_week')).id;
-    
     let targetUserId = req.userId;
     if (req.userRole === 'admin' && req.query.impersonate) {
         targetUserId = parseInt(req.query.impersonate);
     }
 
     const me = await db.get('SELECT family_id FROM users WHERE id = ?', [targetUserId]);
-    if (!me) return res.json({ members: [], grid: {} });
+    if (!me) return res.status(404).json({ error: 'User not found' });
 
     const members = await db.all('SELECT id, display_name as name, sort_order FROM users WHERE family_id = ? ORDER BY sort_order ASC, id ASC', [me.family_id]);
     const ids = members.map(f => f.id);
@@ -202,6 +209,15 @@ app.post('/api/family/link', authenticate, async (req, res) => {
     res.json({ success: true });
 });
 
+app.put('/api/family/member/:id', authenticate, async (req, res) => {
+    if (req.userRole !== 'parent' && req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
+    const me = await db.get('SELECT family_id FROM users WHERE id = ?', [req.userId]);
+    const target = await db.get('SELECT family_id FROM users WHERE id = ?', [req.params.id]);
+    if (!target || target.family_id !== me.family_id) return res.status(403).json({error: 'Invalid target'});
+    await db.run('UPDATE users SET display_name = ? WHERE id = ?', [req.body.displayName, req.params.id]);
+    res.json({ success: true });
+});
+
 app.post('/api/family/reorder', authenticate, async (req, res) => {
     if (req.userRole !== 'parent' && req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
     const { order } = req.body;
@@ -218,7 +234,9 @@ app.post('/api/toggle/:targetId', authenticate, async (req, res) => {
     else { await db.run('DELETE FROM logs WHERE user_id = ? AND week_id = ? AND food_item = ?', [targetId, weekId, req.body.item]); }
     res.json({ success: true });
 });
+// --- END SECTION 5 ---
 
+// --- SECTION 6: ADMIN ROUTES & SCHEDULER ---
 app.get('/api/admin/users', authenticate, async (req, res) => {
     if (req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
     res.json(await db.all(`SELECT id, username, display_name, role, is_suspended, failed_attempts, locked_until FROM users`));
@@ -247,3 +265,4 @@ app.delete('/api/admin/delete/:id', authenticate, async (req, res) => {
 cron.schedule('59 23 * * 0', async () => await db.run("INSERT INTO active_week (week_start_date) VALUES (date('now', 'weekday 1'))"));
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 app.listen(PORT, () => console.log(`API running on port ${PORT}`));
+// --- END SECTION 6 ---
