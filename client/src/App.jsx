@@ -44,6 +44,7 @@ export default function App() {
   const [familyMembers, setFamilyMembers] = useState([]);
   const [gridData, setGridData] = useState({});
   const [adminUsers, setAdminUsers] = useState([]);
+  const [sysSettings, setSysSettings] = useState({});
   const [isLoginView, setIsLoginView] = useState(true);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
@@ -87,7 +88,7 @@ export default function App() {
             .then(data => { setWeeks(data); if (data.length > 0 && !selectedWeek) setSelectedWeek(data[0].id); })
             .catch(() => {});
     }
-  }, [token]);
+  }, [token, refreshTrigger]);
 
   useEffect(() => {
     if (!token || !selectedWeek) return;
@@ -96,6 +97,11 @@ export default function App() {
         .then(r => r.ok ? r.json() : hardReset())
         .then(d => setAdminUsers(Array.isArray(d) ? d : []))
         .catch(hardReset);
+      
+      fetch('/api/admin/settings', { headers: { Authorization: `Bearer ${token}` } })
+        .then(r => r.json())
+        .then(d => setSysSettings(d))
+        .catch(() => {});
     } else {
       const url = impersonatingId ? `/api/family/grid?weekId=${selectedWeek}&impersonate=${impersonatingId}` : `/api/family/grid?weekId=${selectedWeek}`;
       fetch(url, { headers: { Authorization: `Bearer ${token}` } })
@@ -158,6 +164,18 @@ export default function App() {
     if (body) headers['Content-Type'] = 'application/json';
     await fetch(`/api/admin/${action}/${id}`, { method, headers, body });
     setRefreshTrigger(p => p + 1);
+  };
+  
+  const saveSetting = async (key, value) => {
+      setSysSettings(prev => ({ ...prev, [key]: value }));
+      await fetch('/api/admin/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ [key]: value }) });
+  };
+  
+  const forceNewWeek = async () => {
+      if (!window.confirm("Force create a new week right now?")) return;
+      await fetch('/api/admin/force-week', { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+      alert("New week created!");
+      setRefreshTrigger(p => p + 1);
   };
 
   const createMember = async (e) => {
@@ -290,7 +308,6 @@ export default function App() {
         .food-col { position: sticky; left: 0; z-index: 30; background: white; }
         .person-col { position: sticky; top: 0; z-index: 20; }
         .top-left-corner { position: sticky; top: 0; left: 0; z-index: 40; background: #f8fafc; }
-        .category-row { position: sticky; left: 0; z-index: 10; }
         
         .cell-pad { padding: 10px 12px; }
         .drag-handle { position: absolute; right: 0; top: 0; width: 15px; height: 100%; cursor: col-resize; z-index: 25; }
@@ -412,35 +429,56 @@ export default function App() {
 
       {/* VIEW: SYSTEM ADMIN */}
       {currentView === 'admin' && role === 'admin' && (
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', background: 'white', border: '1px solid #e2e8f0' }}>
-            <thead><tr style={{ background: '#f8fafc', borderBottom: '2px solid #cbd5e1' }}>
-              <th style={{ padding: '12px' }}>ID</th><th style={{ padding: '12px' }}>User</th><th style={{ padding: '12px' }}>Role</th><th style={{ padding: '12px' }}>Status</th><th style={{ padding: '12px' }}>Actions</th>
-            </tr></thead>
-            <tbody>{adminUsers.map(u => (
-              <tr key={u.id} style={{ borderBottom: '1px solid #e2e8f0', background: u.is_suspended ? '#fee2e2' : 'white' }}>
-                <td style={{ padding: '12px' }}>{u.id}</td>
-                <td style={{ padding: '12px' }}><strong>{u.display_name}</strong><br/><span style={{fontSize: '0.85em', color: '#64748b'}}>{u.username}</span></td>
-                <td style={{ padding: '12px' }}>
-                    <select value={u.role} onChange={(e) => adminAction(u.id, 'role', e.target.value)} disabled={u.id === 1} style={{ padding: '4px', borderRadius: '4px' }}>
-                        <option value="user">User</option><option value="parent">Parent</option>
-                        <option value="dietitian">Dietitian</option><option value="admin">Admin</option>
-                    </select>
-                </td>
-                <td style={{ padding: '12px' }}>
-                    {u.is_suspended ? 'Suspended' : (u.locked_until && new Date(u.locked_until) > new Date() ? 'Locked (Brute Force)' : 'Active')}
-                </td>
-                <td style={{ padding: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                  <button onClick={() => adminAction(u.id, 'impersonate', u.display_name)} style={{ padding: '6px 10px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Impersonate</button>
-                  <button onClick={() => adminAction(u.id, 'suspend')} disabled={u.id === 1} style={{ padding: '6px 10px', background: u.is_suspended ? '#10b981' : '#f59e0b', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
-                    {u.is_suspended ? 'Unsuspend' : 'Suspend'}
-                  </button>
-                  <button onClick={() => adminAction(u.id, 'delete')} disabled={u.id === 1} style={{ padding: '6px 10px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Delete</button>
-                </td>
-              </tr>
-            ))}</tbody>
-          </table>
-        </div>
+        <>
+          <div style={{ overflowX: 'auto', marginBottom: '30px' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', background: 'white', border: '1px solid #e2e8f0' }}>
+              <thead><tr style={{ background: '#f8fafc', borderBottom: '2px solid #cbd5e1' }}>
+                <th style={{ padding: '12px' }}>ID</th><th style={{ padding: '12px' }}>User</th><th style={{ padding: '12px' }}>Role</th><th style={{ padding: '12px' }}>Status</th><th style={{ padding: '12px' }}>Actions</th>
+              </tr></thead>
+              <tbody>{adminUsers.map(u => (
+                <tr key={u.id} style={{ borderBottom: '1px solid #e2e8f0', background: u.is_suspended ? '#fee2e2' : 'white' }}>
+                  <td style={{ padding: '12px' }}>{u.id}</td>
+                  <td style={{ padding: '12px' }}><strong>{u.display_name}</strong><br/><span style={{fontSize: '0.85em', color: '#64748b'}}>{u.username}</span></td>
+                  <td style={{ padding: '12px' }}>
+                      <select value={u.role} onChange={(e) => adminAction(u.id, 'role', e.target.value)} disabled={u.id === 1} style={{ padding: '4px', borderRadius: '4px' }}>
+                          <option value="user">User</option><option value="parent">Parent</option>
+                          <option value="dietitian">Dietitian</option><option value="admin">Admin</option>
+                      </select>
+                  </td>
+                  <td style={{ padding: '12px' }}>
+                      {u.is_suspended ? 'Suspended' : (u.locked_until && new Date(u.locked_until) > new Date() ? 'Locked (Brute Force)' : 'Active')}
+                  </td>
+                  <td style={{ padding: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    <button onClick={() => adminAction(u.id, 'impersonate', u.display_name)} style={{ padding: '6px 10px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Impersonate</button>
+                    <button onClick={() => adminAction(u.id, 'suspend')} disabled={u.id === 1} style={{ padding: '6px 10px', background: u.is_suspended ? '#10b981' : '#f59e0b', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+                      {u.is_suspended ? 'Unsuspend' : 'Suspend'}
+                    </button>
+                    <button onClick={() => adminAction(u.id, 'delete')} disabled={u.id === 1} style={{ padding: '6px 10px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Delete</button>
+                  </td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+          
+          <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '8px', border: '1px solid #e2e8f0', maxWidth: '600px' }}>
+              <h3 style={{ marginTop: 0 }}>Global System Settings</h3>
+              <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <strong>Week Rollover Day:</strong>
+                      <select value={sysSettings.rollover_day || '0'} onChange={e => saveSetting('rollover_day', e.target.value)} className="form-input" style={{ minWidth: '150px' }}>
+                          <option value="0">Sunday</option>
+                          <option value="1">Monday</option>
+                          <option value="2">Tuesday</option>
+                          <option value="3">Wednesday</option>
+                          <option value="4">Thursday</option>
+                          <option value="5">Friday</option>
+                          <option value="6">Saturday</option>
+                      </select>
+                  </label>
+                  <button onClick={forceNewWeek} style={{ padding: '8px 16px', background: '#eab308', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', height: 'fit-content' }}>Force Start New Week Now</button>
+              </div>
+          </div>
+        </>
       )}
 
       {/* VIEW: MAIN TRACKER GRID */}
@@ -474,9 +512,14 @@ export default function App() {
                 {Object.keys(filteredCategories).map(category => (
                   <React.Fragment key={category}>
                     <tr>
-                      <td colSpan={familyMembers.length + 1} onClick={() => setCollapsedCats({...collapsedCats, [category]: !collapsedCats[category]})} className="category-row" style={{ background: '#e2e8f0', padding: '8px 12px', textAlign: 'left', fontWeight: 'bold', cursor: 'pointer' }}>
+                      <td onClick={() => setCollapsedCats({...collapsedCats, [category]: !collapsedCats[category]})} className="food-col cell-pad category-row" style={{ background: '#e2e8f0', borderBottom: '2px solid #cbd5e1', borderRight: '2px solid #cbd5e1', textAlign: 'left', fontWeight: 'bold', cursor: 'pointer' }}>
                         {collapsedCats[category] ? '▶' : '▼'} {category}
                       </td>
+                      {familyMembers.map((m, idx) => (
+                        <td key={m.id} className="cell-pad category-row" style={{ background: '#f1f5f9', color: '#94a3b8', fontSize: '0.85em', textAlign: 'center', borderBottom: '2px solid #cbd5e1', borderRight: '1px solid #cbd5e1', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                           {category}
+                        </td>
+                      ))}
                     </tr>
                     {!collapsedCats[category] && filteredCategories[category].map(food => {
                       const checkedCount = familyMembers.filter(m => (gridData[m.id] || []).includes(food)).length;

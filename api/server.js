@@ -35,8 +35,8 @@ let db;
         CREATE TABLE IF NOT EXISTS active_week (id INTEGER PRIMARY KEY AUTOINCREMENT, week_start_date TEXT);
         CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, week_id INTEGER, food_item TEXT, FOREIGN KEY(user_id) REFERENCES users(id));
         CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
-        INSERT INTO active_week (id, week_start_date) SELECT 1, date('now', 'weekday 1', '-7 days') WHERE NOT EXISTS (SELECT 1 FROM active_week WHERE id = 1);
-        INSERT OR IGNORE INTO settings (key, value) VALUES ('max_attempts', '5'), ('lockout_mins', '15');
+        INSERT INTO active_week (id, week_start_date) SELECT 1, date('now', 'localtime', '-7 days') WHERE NOT EXISTS (SELECT 1 FROM active_week WHERE id = 1);
+        INSERT OR IGNORE INTO settings (key, value) VALUES ('max_attempts', '5'), ('lockout_mins', '15'), ('rollover_day', '0');
     `);
     
     try { await db.exec("ALTER TABLE users ADD COLUMN is_suspended INTEGER DEFAULT 0;"); } catch (e) {}
@@ -262,7 +262,37 @@ app.delete('/api/admin/delete/:id', authenticate, async (req, res) => {
     res.json({ success: true });
 });
 
-cron.schedule('59 23 * * 0', async () => await db.run("INSERT INTO active_week (week_start_date) VALUES (date('now', 'weekday 1'))"));
+app.get('/api/admin/settings', authenticate, async (req, res) => {
+    if (req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
+    const rows = await db.all('SELECT key, value FROM settings');
+    const settings = {};
+    rows.forEach(r => settings[r.key] = r.value);
+    res.json(settings);
+});
+
+app.put('/api/admin/settings', authenticate, async (req, res) => {
+    if (req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
+    for (const [key, value] of Object.entries(req.body)) {
+        await db.run('UPDATE settings SET value = ? WHERE key = ?', [value, key]);
+    }
+    res.json({ success: true });
+});
+
+app.post('/api/admin/force-week', authenticate, async (req, res) => {
+    if (req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
+    await db.run("INSERT INTO active_week (week_start_date) VALUES (date('now', 'localtime'))");
+    res.json({ success: true });
+});
+
+// Run every midnight to check if today is the designated rollover day
+cron.schedule('1 0 * * *', async () => {
+    const setting = await db.get("SELECT value FROM settings WHERE key = 'rollover_day'");
+    const rolloverDay = setting ? parseInt(setting.value) : 0; // Default 0 = Sunday
+    if (new Date().getDay() === rolloverDay) {
+        await db.run("INSERT INTO active_week (week_start_date) VALUES (date('now', 'localtime'))");
+    }
+});
+
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 app.listen(PORT, () => console.log(`API running on port ${PORT}`));
 // --- END SECTION 6 ---
