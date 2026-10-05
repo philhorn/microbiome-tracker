@@ -141,6 +141,7 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
                     border-bottom-left-radius: 8px;
                     border-bottom-right-radius: 8px;
                     background: white;
+                    -webkit-overflow-scrolling: touch;
                 }
                 .tracker-table {
                     border-collapse: separate;
@@ -148,13 +149,11 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
                     width: 100%;
                     text-align: center;
                 }
-                /* Sticky Member Header Row (Locks to top of browser window when scrolling page) */
                 .tracker-table th.person-col {
                     position: sticky;
                     top: 0;
                     z-index: 30;
                 }
-                /* Sticky Top-Left Corner (Task / Item Header) */
                 .tracker-table th.food-col-header {
                     position: sticky;
                     top: 0;
@@ -162,14 +161,12 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
                     z-index: 40;
                     background: #f1f5f9;
                 }
-                /* Sticky Task Item Cells (Left Column) */
                 .tracker-table td.food-col-cell {
                     position: sticky;
                     left: 0;
                     z-index: 20;
                     background: white;
                 }
-                /* Sticky Category Row Cells */
                 .tracker-table td.cat-col-cell {
                     position: sticky;
                     left: 0;
@@ -200,11 +197,12 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
 
                 return (
                     <div key={group.id} style={{ border: '1px solid #cbd5e1', borderRadius: '8px', background: 'white', overflow: 'hidden', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}>
-                        <div onClick={() => setCollapsedGroups({...collapsedGroups, [group.id]: !isGroupCollapsed})} style={{ background: '#1e293b', color: 'white', padding: '14px 15px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', userSelect: 'none' }}>
+                        <div onClick={() => setCollapsedGroups({...collapsedGroups, [group.id]: !isGroupCollapsed})} style={{ background: group.theme_color || '#1e293b', color: 'white', padding: '14px 15px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', userSelect: 'none', transition: 'background 0.3s ease' }}>
                             <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '10px', fontSize: '16px' }}>
-                                <span>{isGroupCollapsed ? '▶' : '▼'}</span> {group.name}
+                                {group.logo_url && <img src={group.logo_url} alt="Logo" style={{ height: '24px', borderRadius: '4px', background: 'white', padding: '2px' }} />}
+                                <span>{isGroupCollapsed ? '▶' : '▼'}</span> {group.name} {group.app_name ? `(${group.app_name})` : ''}
                             </h3>
-                            <span style={{ fontSize: '12px', background: '#334155', padding: '4px 10px', borderRadius: '12px', fontWeight: 'bold' }}>{group.members.length} Members</span>
+                            <span style={{ fontSize: '12px', background: 'rgba(0,0,0,0.2)', padding: '4px 10px', borderRadius: '12px', fontWeight: 'bold' }}>{group.members.length} Members</span>
                         </div>
                         
                         {!isGroupCollapsed && (

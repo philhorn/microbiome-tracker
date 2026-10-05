@@ -241,7 +241,7 @@ app.get('/api/groups/grid', authenticate, async (req, res) => {
     }
     
     const groupIds = myGroups.map(g => g.group_id);
-    const groups = await db.all(`SELECT id, name, join_code, isolate_tracker, app_name, theme_color FROM groups WHERE id = ANY($1::int[])`, [groupIds]);
+    const groups = await db.all(`SELECT id, name, join_code, isolate_tracker, app_name, theme_color, logo_url FROM groups WHERE id = ANY($1::int[])`, [groupIds]);
     const members = await db.all(`SELECT gm.group_id, u.id, u.display_name as name, gm.sort_order FROM group_members gm JOIN users u ON gm.user_id = u.id WHERE gm.group_id = ANY($1::int[]) ORDER BY gm.group_id, gm.sort_order ASC, u.id ASC`, [groupIds]);
     
     const formattedGroups = groups.map(g => ({ ...g, members: members.filter(m => m.group_id === g.id) }));
@@ -287,7 +287,7 @@ app.post('/api/groups/join', authenticate, async (req, res) => {
 
 app.put('/api/groups/:groupId', authenticate, async (req, res) => {
     if (req.userRole !== 'parent' && req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
-    await db.run('UPDATE groups SET name = ?, app_name = ?, theme_color = ? WHERE id = ?', [req.body.name, req.body.appName, req.body.themeColor, req.params.groupId]);
+    await db.run('UPDATE groups SET name = ?, app_name = ?, theme_color = ?, logo_url = ? WHERE id = ?', [req.body.name, req.body.appName, req.body.themeColor, req.body.logoUrl, req.params.groupId]);
     res.json({ success: true });
 });
 

@@ -18,6 +18,19 @@ export default function GroupManager({ groups, token, impersonatingId, apiFetch,
         if (data.success) { setJoinGroupPin(''); refreshTrigger(); alert("Joined Group!"); } else alert(data.error);
     };
 
+    const shiftGroupOrder = async (index, direction) => {
+        const newGroups = [...groups];
+        if (direction === -1 && index > 0) {
+            [newGroups[index - 1], newGroups[index]] = [newGroups[index], newGroups[index - 1]];
+        } else if (direction === 1 && index < newGroups.length - 1) {
+            [newGroups[index + 1], newGroups[index]] = [newGroups[index], newGroups[index + 1]];
+        } else {
+            return;
+        }
+        await apiFetch('/api/groups/reorder', token, impersonatingId, { method: 'POST', body: JSON.stringify({ order: newGroups.map(g => g.id) }) });
+        refreshTrigger();
+    };
+
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '800px' }}>
             <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
@@ -32,14 +45,14 @@ export default function GroupManager({ groups, token, impersonatingId, apiFetch,
                     <button type="submit" className="form-btn" style={{ background: '#10b981' }}>Join Group</button>
                 </form>
             </div>
-            {groups.map(g => (
-                <GroupCard key={g.id} g={g} token={token} impersonatingId={impersonatingId} apiFetch={apiFetch} refreshTrigger={refreshTrigger} />
+            {groups.map((g, idx) => (
+                <GroupCard key={g.id} g={g} index={idx} totalGroups={groups.length} shiftGroupOrder={shiftGroupOrder} token={token} impersonatingId={impersonatingId} apiFetch={apiFetch} refreshTrigger={refreshTrigger} />
             ))}
         </div>
     );
 }
 
-function GroupCard({ g, token, impersonatingId, apiFetch, refreshTrigger }) {
+function GroupCard({ g, index, totalGroups, shiftGroupOrder, token, impersonatingId, apiFetch, refreshTrigger }) {
     const [editingMemberId, setEditingMemberId] = useState(null);
     const [editMemberName, setEditMemberName] = useState('');
     
@@ -47,6 +60,7 @@ function GroupCard({ g, token, impersonatingId, apiFetch, refreshTrigger }) {
     const [editGroupName, setEditGroupName] = useState(g.name);
     const [editAppName, setEditAppName] = useState(g.app_name || '');
     const [editThemeColor, setEditThemeColor] = useState(g.theme_color || '#2563eb');
+    const [editLogoUrl, setEditLogoUrl] = useState(g.logo_url || '');
     
     const [isIsolated, setIsIsolated] = useState(g.isolate_tracker === 1);
     
@@ -81,7 +95,7 @@ function GroupCard({ g, token, impersonatingId, apiFetch, refreshTrigger }) {
 
     const saveGroupSettings = async () => {
         if (!editGroupName.trim()) return;
-        await apiFetch(`/api/groups/${g.id}`, token, impersonatingId, { method: 'PUT', body: JSON.stringify({ name: editGroupName.trim(), appName: editAppName.trim() || null, themeColor: editThemeColor || null }) });
+        await apiFetch(`/api/groups/${g.id}`, token, impersonatingId, { method: 'PUT', body: JSON.stringify({ name: editGroupName.trim(), appName: editAppName.trim() || null, themeColor: editThemeColor || null, logoUrl: editLogoUrl.trim() || null }) });
         setEditingGroupId(false); refreshTrigger();
     };
 
@@ -120,7 +134,8 @@ function GroupCard({ g, token, impersonatingId, apiFetch, refreshTrigger }) {
                     {editingGroupId ? (
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', background: '#f8fafc', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
                             <label style={{ display: 'flex', flexDirection: 'column', fontSize: '12px', fontWeight: 'bold' }}>Group Name: <input value={editGroupName} onChange={e=>setEditGroupName(e.target.value)} className="form-input"/></label>
-                            <label style={{ display: 'flex', flexDirection: 'column', fontSize: '12px', fontWeight: 'bold' }}>Custom App Name: <input value={editAppName} onChange={e=>setEditAppName(e.target.value)} placeholder="Default Global" className="form-input"/></label>
+                            <label style={{ display: 'flex', flexDirection: 'column', fontSize: '12px', fontWeight: 'bold' }}>Custom App Name: <input value={editAppName} onChange={e=>setEditAppName(e.target.value)} placeholder="e.g. Test App Name" className="form-input"/></label>
+                            <label style={{ display: 'flex', flexDirection: 'column', fontSize: '12px', fontWeight: 'bold' }}>Logo Image URL: <input value={editLogoUrl} onChange={e=>setEditLogoUrl(e.target.value)} placeholder="https://..." className="form-input"/></label>
                             <label style={{ display: 'flex', flexDirection: 'column', fontSize: '12px', fontWeight: 'bold' }}>Theme Color: <input type="color" value={editThemeColor} onChange={e=>setEditThemeColor(e.target.value)} style={{ padding: 0, height: '35px', width: '50px', cursor: 'pointer', border: '1px solid #cbd5e1', borderRadius: '4px' }}/></label>
                             <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
                                 <button onClick={saveGroupSettings} style={{ padding: '8px 12px', background: '#10b981', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>Save</button>
@@ -130,8 +145,9 @@ function GroupCard({ g, token, impersonatingId, apiFetch, refreshTrigger }) {
                     ) : (
                         <div>
                             <h3 style={{ margin: '0 0 5px 0', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                {g.logo_url && <img src={g.logo_url} alt="Logo" style={{ height: '24px', borderRadius: '4px' }} />}
                                 {g.name}
-                                <button onClick={() => { setEditingGroupId(true); setEditGroupName(g.name); setEditAppName(g.app_name || ''); setEditThemeColor(g.theme_color || '#2563eb'); }} style={{ fontSize: '12px', padding: '4px 8px', background: '#e2e8f0', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Edit Settings</button>
+                                <button onClick={() => { setEditingGroupId(true); setEditGroupName(g.name); setEditAppName(g.app_name || ''); setEditThemeColor(g.theme_color || '#2563eb'); setEditLogoUrl(g.logo_url || ''); }} style={{ fontSize: '12px', padding: '4px 8px', background: '#e2e8f0', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Edit Settings</button>
                             </h3>
                             {g.app_name && <div style={{ fontSize: '12px', color: '#64748b' }}>Custom Branding: <strong>{g.app_name}</strong> <span style={{display: 'inline-block', width: '12px', height: '12px', background: g.theme_color, borderRadius: '50%', marginLeft: '5px', verticalAlign: 'middle'}}></span></div>}
                         </div>
@@ -140,9 +156,10 @@ function GroupCard({ g, token, impersonatingId, apiFetch, refreshTrigger }) {
                         <button onClick={toggleIsolation} style={{ padding: '4px 12px', borderRadius: '15px', border: '1px solid #cbd5e1', background: isIsolated ? '#fef2f2' : '#f0fdf4', color: isIsolated ? '#991b1b' : '#166534', cursor: 'pointer', fontWeight: 'bold' }}>
                             {isIsolated ? '🔒 Isolated Checklist' : '🌐 Unified Checklist'}
                         </button>
-                        <span style={{ color: '#64748b', fontStyle: 'italic', fontSize: '12px' }}>
-                            {isIsolated ? "Checks stay strictly inside this group." : "Global checks auto-sync to other Unified groups."}
-                        </span>
+                        <div style={{ display: 'flex', gap: '4px', marginLeft: 'auto' }}>
+                            <button onClick={() => shiftGroupOrder(index, -1)} disabled={index === 0} style={{ padding: '4px 8px', cursor: 'pointer', border: '1px solid #cbd5e1', background: 'white', borderRadius: '4px', opacity: index === 0 ? 0.5 : 1 }}>Move Up</button>
+                            <button onClick={() => shiftGroupOrder(index, 1)} disabled={index === totalGroups - 1} style={{ padding: '4px 8px', cursor: 'pointer', border: '1px solid #cbd5e1', background: 'white', borderRadius: '4px', opacity: index === totalGroups - 1 ? 0.5 : 1 }}>Move Down</button>
+                        </div>
                     </div>
                 </div>
                 <span style={{ background: '#fef3c7', padding: '6px 12px', borderRadius: '4px', border: '1px solid #fcd34d' }}><strong>Group PIN:</strong> {g.join_code}</span>
@@ -183,6 +200,7 @@ function GroupCard({ g, token, impersonatingId, apiFetch, refreshTrigger }) {
                 </form>
                 <form onSubmit={addExistingUsersBulk} style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '10px', background: '#f1f5f9', borderRadius: '4px', flexGrow: 1 }}>
                     <strong style={{ fontSize: '14px', color: '#475569' }}>Add Existing User(s):</strong>
+                    {bulkLinks.linkCode && <div></div>}
                     {bulkLinks.map((link, idx) => (
                         <div key={idx} style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
                             <input type="text" placeholder="Their Username" value={link.username} onChange={e => handleBulkChange(idx, 'username', e.target.value)} required={idx === 0} className="form-input"/>
@@ -190,8 +208,8 @@ function GroupCard({ g, token, impersonatingId, apiFetch, refreshTrigger }) {
                             {bulkLinks.length > 1 && <button type="button" onClick={() => removeBulkRow(idx)} style={{ padding: '8px 12px', background: '#fca5a5', color: '#7f1d1d', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>X</button>}
                         </div>
                     ))}
-                    <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
-                        <button type="button" onClick={addBulkRow} style={{ padding: '8px 16px', background: '#e2e8f0', color: '#475569', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer', flexGrow: 1 }}>+ Add Another Row</button>
+                    <div style={{ display: 'flex', gap: '4px', marginTop: '4px' }}>
+                        <button type="button" onClick={addBulkRow} style={{ padding: '6px 12px', background: '#e2e8f0', color: '#475569', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer', flexGrow: 1 }}>+ Add Another Row</button>
                         <button type="submit" className="form-btn" style={{ background: '#10b981', flexGrow: 2 }}>Add Users</button>
                     </div>
                 </form>
