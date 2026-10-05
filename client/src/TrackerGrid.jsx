@@ -143,6 +143,24 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
                     background: white;
                     -webkit-overflow-scrolling: touch;
                 }
+                /* STYLIZED VISIBLE HORIZONTAL SCROLLBAR */
+                .tracker-table-container::-webkit-scrollbar {
+                    height: 12px;
+                }
+                .tracker-table-container::-webkit-scrollbar-track {
+                    background: #f1f5f9;
+                    border-bottom-left-radius: 8px;
+                    border-bottom-right-radius: 8px;
+                }
+                .tracker-table-container::-webkit-scrollbar-thumb {
+                    background: #94a3b8;
+                    border-radius: 6px;
+                    border: 2px solid #f1f5f9;
+                }
+                .tracker-table-container::-webkit-scrollbar-thumb:hover {
+                    background: #64748b;
+                }
+
                 .tracker-table {
                     border-collapse: separate;
                     border-spacing: 0;
@@ -154,6 +172,7 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
                     position: sticky;
                     top: 0;
                     z-index: 30;
+                    padding: 12px 14px;
                 }
                 .tracker-table th.food-col-header {
                     position: sticky;
@@ -161,18 +180,24 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
                     left: 0;
                     z-index: 40;
                     background: #f1f5f9;
+                    padding: 12px 14px;
                 }
                 .tracker-table td.food-col-cell {
                     position: sticky;
                     left: 0;
                     z-index: 20;
                     background: white;
+                    padding: 12px 14px;
+                }
+                .tracker-table td.cell-pad {
+                    padding: 12px 14px;
                 }
                 .tracker-table tr.cat-row td {
                     position: sticky;
                     left: 0;
                     z-index: 20;
                     background: #cbd5e1;
+                    padding: 12px 14px;
                 }
             `}</style>
 
@@ -212,11 +237,11 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
                                 <table className="tracker-table">
                                     <thead>
                                         <tr>
-                                            <th className="food-col-header cell-pad" style={{ width: colWidths['food'] || 160, minWidth: 120, maxWidth: colWidths['food'] || 160, borderBottom: '2px solid #94a3b8', borderRight: '2px solid #94a3b8', textAlign: 'left' }}>
+                                            <th className="food-col-header" style={{ width: colWidths['food'] || 160, minWidth: 120, maxWidth: colWidths['food'] || 160, borderBottom: '2px solid #94a3b8', borderRight: '2px solid #94a3b8', textAlign: 'left' }}>
                                                 Task / Item <div className="drag-handle" onMouseDown={(e) => handleDrag(e, 'food', 160)} />
                                             </th>
                                             {group.members.map((m, idx) => (
-                                                <th key={m.id} className="person-col cell-pad" style={{ width: colWidths[m.id] || 90, minWidth: 80, maxWidth: colWidths[m.id] || 90, background: columnColors[idx % columnColors.length], borderBottom: '2px solid #94a3b8', borderRight: '1px solid #e2e8f0' }}>
+                                                <th key={m.id} className="person-col" style={{ width: colWidths[m.id] || 90, minWidth: 80, maxWidth: colWidths[m.id] || 90, background: columnColors[idx % columnColors.length], borderBottom: '2px solid #94a3b8', borderRight: '1px solid #e2e8f0' }}>
                                                     <span style={{ fontWeight: 'bold' }}>{m.name}</span><br/>
                                                     <span style={{ fontSize: '0.85em', fontWeight: 'normal', color: '#64748b' }}>Score: {gridData[group.id]?.[m.id]?.length || 0}</span>
                                                     <div className="drag-handle" onMouseDown={(e) => handleDrag(e, m.id, 90)} />
@@ -245,7 +270,7 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
                                             return (
                                             <React.Fragment key={catKey}>
                                                 <tr className="cat-row">
-                                                    <td colSpan={totalColumns} onClick={() => setCollapsedCats({...collapsedCats, [catKey]: !collapsedCats[catKey]})} className="cell-pad" style={{ borderBottom: '2px solid #94a3b8', borderRight: '2px solid #94a3b8', textAlign: 'left', fontWeight: 'bold', cursor: 'pointer', color: '#0f172a', fontSize: '14px', background: '#cbd5e1' }}>
+                                                    <td colSpan={totalColumns} onClick={() => setCollapsedCats({...collapsedCats, [catKey]: !collapsedCats[catKey]})} style={{ borderBottom: '2px solid #94a3b8', borderRight: '2px solid #94a3b8', textAlign: 'left', fontWeight: 'bold', cursor: 'pointer', color: '#0f172a', fontSize: '14px', background: '#cbd5e1', padding: '12px 14px' }}>
                                                         {collapsedCats[catKey] ? '▶' : '▼'} {category}
                                                     </td>
                                                 </tr>
@@ -264,7 +289,7 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
 
                                                     return (
                                                     <tr key={item.name}>
-                                                        <td className="food-col-cell cell-pad" style={{ borderBottom: '1px solid #f1f5f9', borderRight: '2px solid #cbd5e1', textAlign: 'left', fontWeight: '500', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                        <td className="food-col-cell" style={{ borderBottom: '1px solid #f1f5f9', borderRight: '2px solid #cbd5e1', textAlign: 'left', fontWeight: '500', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                                             <span style={{ color: isGlobal ? '#1d4ed8' : 'inherit' }}>
                                                                 {item.name} {isGlobal && <span style={{fontSize: '10px', background: '#dbeafe', padding: '2px 4px', borderRadius: '4px', marginLeft: '6px', fontWeight: 'bold'}}>Global</span>}
                                                             </span>
