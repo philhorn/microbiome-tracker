@@ -141,7 +141,6 @@ export default function App() {
         .nav-btn.active { color: var(--theme-color); border-bottom: 2px solid var(--theme-color); }
         .food-col { position: sticky; left: 0; z-index: 30; background: white; }
         .person-col { position: sticky; top: 0; z-index: 20; }
-        .top-left-corner { position: sticky; top: 0; left: 0; z-index: 40; background: #f8fafc; }
         .cell-pad { padding: 10px 12px; position: relative; }
         .drag-handle { position: absolute; right: 0; top: 0; width: 15px; height: 100%; cursor: col-resize; z-index: 25; }
         .drag-handle:hover { background: rgba(0,0,0,0.05); }
