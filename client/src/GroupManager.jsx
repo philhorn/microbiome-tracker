@@ -18,16 +18,16 @@ export default function GroupManager({ groups, token, impersonatingId, apiFetch,
         if (data.success) { setJoinGroupPin(''); refreshTrigger(); alert("Joined Group!"); } else alert(data.error);
     };
 
-    const shiftGroupOrder = async (index, direction) => {
-        const newGroups = [...groups];
-        if (direction === -1 && index > 0) {
-            [newGroups[index - 1], newGroups[index]] = [newGroups[index], newGroups[index - 1]];
-        } else if (direction === 1 && index < newGroups.length - 1) {
-            [newGroups[index + 1], newGroups[index]] = [newGroups[index], newGroups[index + 1]];
-        } else {
-            return;
-        }
-        await apiFetch('/api/groups/reorder', token, impersonatingId, { method: 'POST', body: JSON.stringify({ order: newGroups.map(g => g.id) }) });
+    const handleJumpToPosition = async (targetGroupId, newIndex) => {
+        const currentGroups = [...groups];
+        const currentIndex = currentGroups.findIndex(g => g.id === targetGroupId);
+        if (currentIndex === -1) return;
+
+        // Remove from old position and insert at new position
+        const [movedGroup] = currentGroups.splice(currentIndex, 1);
+        currentGroups.splice(newIndex, 0, movedGroup);
+
+        await apiFetch('/api/groups/reorder', token, impersonatingId, { method: 'POST', body: JSON.stringify({ order: currentGroups.map(g => g.id) }) });
         refreshTrigger();
     };
 
@@ -46,13 +46,13 @@ export default function GroupManager({ groups, token, impersonatingId, apiFetch,
                 </form>
             </div>
             {groups.map((g, idx) => (
-                <GroupCard key={g.id} g={g} index={idx} totalGroups={groups.length} shiftGroupOrder={shiftGroupOrder} token={token} impersonatingId={impersonatingId} apiFetch={apiFetch} refreshTrigger={refreshTrigger} />
+                <GroupCard key={g.id} g={g} index={idx} totalGroups={groups.length} handleJumpToPosition={handleJumpToPosition} token={token} impersonatingId={impersonatingId} apiFetch={apiFetch} refreshTrigger={refreshTrigger} />
             ))}
         </div>
     );
 }
 
-function GroupCard({ g, index, totalGroups, shiftGroupOrder, token, impersonatingId, apiFetch, refreshTrigger }) {
+function GroupCard({ g, index, totalGroups, handleJumpToPosition, token, impersonatingId, apiFetch, refreshTrigger }) {
     const [editingMemberId, setEditingMemberId] = useState(null);
     const [editMemberName, setEditMemberName] = useState('');
     
@@ -152,14 +152,18 @@ function GroupCard({ g, index, totalGroups, shiftGroupOrder, token, impersonatin
                             {g.app_name && <div style={{ fontSize: '12px', color: '#64748b' }}>Custom Branding: <strong>{g.app_name}</strong> <span style={{display: 'inline-block', width: '12px', height: '12px', background: g.theme_color, borderRadius: '50%', marginLeft: '5px', verticalAlign: 'middle'}}></span></div>}
                         </div>
                     )}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '14px', marginTop: '5px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '15px', fontSize: '14px', marginTop: '5px', flexWrap: 'wrap' }}>
                         <button onClick={toggleIsolation} style={{ padding: '4px 12px', borderRadius: '15px', border: '1px solid #cbd5e1', background: isIsolated ? '#fef2f2' : '#f0fdf4', color: isIsolated ? '#991b1b' : '#166534', cursor: 'pointer', fontWeight: 'bold' }}>
                             {isIsolated ? '🔒 Isolated Checklist' : '🌐 Unified Checklist'}
                         </button>
-                        <div style={{ display: 'flex', gap: '4px', marginLeft: 'auto' }}>
-                            <button onClick={() => shiftGroupOrder(index, -1)} disabled={index === 0} style={{ padding: '4px 8px', cursor: 'pointer', border: '1px solid #cbd5e1', background: 'white', borderRadius: '4px', opacity: index === 0 ? 0.5 : 1 }}>Move Up</button>
-                            <button onClick={() => shiftGroupOrder(index, 1)} disabled={index === totalGroups - 1} style={{ padding: '4px 8px', cursor: 'pointer', border: '1px solid #cbd5e1', background: 'white', borderRadius: '4px', opacity: index === totalGroups - 1 ? 0.5 : 1 }}>Move Down</button>
-                        </div>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#475569', fontWeight: 'bold', marginLeft: 'auto' }}>
+                            Display Position:
+                            <select value={index} onChange={(e) => handleJumpToPosition(g.id, parseInt(e.target.value))} style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', background: 'white', fontWeight: 'bold' }}>
+                                {Array.from({ length: totalGroups }, (_, i) => (
+                                    <option key={i} value={i}>Position {i + 1} of {totalGroups}</option>
+                                ))}
+                            </select>
+                        </label>
                     </div>
                 </div>
                 <span style={{ background: '#fef3c7', padding: '6px 12px', borderRadius: '4px', border: '1px solid #fcd34d' }}><strong>Group PIN:</strong> {g.join_code}</span>
@@ -200,7 +204,6 @@ function GroupCard({ g, index, totalGroups, shiftGroupOrder, token, impersonatin
                 </form>
                 <form onSubmit={addExistingUsersBulk} style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '10px', background: '#f1f5f9', borderRadius: '4px', flexGrow: 1 }}>
                     <strong style={{ fontSize: '14px', color: '#475569' }}>Add Existing User(s):</strong>
-                    {bulkLinks.linkCode && <div></div>}
                     {bulkLinks.map((link, idx) => (
                         <div key={idx} style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
                             <input type="text" placeholder="Their Username" value={link.username} onChange={e => handleBulkChange(idx, 'username', e.target.value)} required={idx === 0} className="form-input"/>
@@ -209,7 +212,7 @@ function GroupCard({ g, index, totalGroups, shiftGroupOrder, token, impersonatin
                         </div>
                     ))}
                     <div style={{ display: 'flex', gap: '4px', marginTop: '4px' }}>
-                        <button type="button" onClick={addBulkRow} style={{ padding: '6px 12px', background: '#e2e8f0', color: '#475569', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer', flexGrow: 1 }}>+ Add Another Row</button>
+                        <button type="button" onClick={addBulkRow} style={{ padding: '6px 12px', background: '#e2e8f0', color: '#475569', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer', flexGrow: '1' }}>+ Add Another Row</button>
                         <button type="submit" className="form-btn" style={{ background: '#10b981', flexGrow: 2 }}>Add Users</button>
                     </div>
                 </form>
