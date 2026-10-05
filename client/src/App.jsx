@@ -28,8 +28,8 @@ export default function App() {
   const [adminUsers, setAdminUsers] = useState([]);
   
   const [sysSettings, setSysSettings] = useState({});
-  const [appName, setAppName] = useState('Tracker');
-  const [themeColor, setThemeColor] = useState('#2563eb');
+  const [globalAppName, setGlobalAppName] = useState('Tracker');
+  const [globalThemeColor, setGlobalThemeColor] = useState('#2563eb');
 
   const [listItems, setListItems] = useState([]);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
@@ -51,12 +51,7 @@ export default function App() {
   useEffect(() => {
     fetch('/api/public-config')
         .then(r => r.json())
-        .then(data => { 
-            setAppName(data.appName); 
-            setThemeColor(data.themeColor); 
-            document.documentElement.style.setProperty('--theme-color', data.themeColor);
-            document.title = data.appName;
-        }).catch(() => {});
+        .then(data => { setGlobalAppName(data.appName); setGlobalThemeColor(data.themeColor); }).catch(() => {});
   }, [refreshTrigger]);
 
   useEffect(() => {
@@ -79,9 +74,8 @@ export default function App() {
         .then(r => r.ok ? r.json() : hardReset())
         .then(d => { 
             if (d && !d.error) { 
-                setGroups(d.groups || []); 
-                setGridData(d.grid || {});
-                setVisibleGroupIds((d.groups || []).map(g => g.id));
+                setGroups(d.groups || []); setGridData(d.grid || {});
+                if (visibleGroupIds.length === 0) setVisibleGroupIds((d.groups || []).map(g => g.id));
             } 
         }).catch(hardReset);
     }
@@ -106,34 +100,27 @@ export default function App() {
     }
   };
 
-  const handleUpgrade = async () => {
-    if (!window.confirm("Convert this account to a Group Manager?")) return;
-    const res = await apiFetch('/api/user/upgrade', token, impersonatingUser?.id, { method: 'POST' });
-    const data = await res.json();
-    if (data.success) { 
-        if (impersonatingUser) setImpersonatingUser(prev => ({...prev, role: data.role}));
-        else { localStorage.setItem('role', data.role); setRole(data.role); }
-    }
-  };
-
-  const handleDeleteSelf = async () => {
-    if (!window.confirm("WARNING: This permanently deletes your account and data. Proceed?")) return;
-    await apiFetch('/api/user/delete', token, impersonatingUser?.id, { method: 'DELETE' });
-    if (impersonatingUser) { setImpersonatingUser(null); setRefreshTrigger(p => p+1); } else { hardReset(); }
-  };
-
   if (!token) return <Auth setAuthData={setAuthData} setupNotice={setupNotice} />;
 
-  const displayedUsers = [];
-  const seenIds = new Set();
-  groups.filter(g => visibleGroupIds.includes(g.id)).forEach(g => {
-      g.members.forEach(m => { if (!seenIds.has(m.id)) { seenIds.add(m.id); displayedUsers.push(m); } });
-  });
+  // DYNAMIC BRANDING LOGIC
+  let activeAppName = globalAppName;
+  let activeThemeColor = globalThemeColor;
+
+  if (visibleGroupIds.length === 1) {
+      const activeGroup = groups.find(g => g.id === visibleGroupIds[0]);
+      if (activeGroup) {
+          if (activeGroup.app_name) activeAppName = activeGroup.app_name;
+          if (activeGroup.theme_color) activeThemeColor = activeGroup.theme_color;
+      }
+  }
+
+  document.documentElement.style.setProperty('--theme-color', activeThemeColor);
+  document.title = activeAppName;
 
   return (
     <div className="app-container" style={{ fontFamily: 'system-ui', maxWidth: '1200px', margin: '0 auto', padding: '15px' }}>
       <style>{`
-        :root { --theme-color: ${themeColor}; }
+        :root { --theme-color: ${activeThemeColor}; transition: all 0.3s ease; }
         .form-group { display: flex; gap: 8px; background: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; borderRadius: 8px; flex-grow: 1; flex-wrap: wrap; align-items: center; }
         .form-input { padding: 8px; border-radius: 4px; border: 1px solid #cbd5e1; flex: 1 1 120px; }
         .form-btn { padding: 8px 16px; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; flex: 1 1 100%; background: var(--theme-color); }
@@ -153,7 +140,7 @@ export default function App() {
       `}</style>
       
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: '20px', gap: '15px', borderBottom: '2px solid #e2e8f0', paddingBottom: '15px' }}>
-         <h1 style={{ margin: 0, color: 'var(--theme-color)' }}>{appName}</h1>
+         <h1 style={{ margin: 0, color: 'var(--theme-color)' }}>{activeAppName}</h1>
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '15px' }}>
@@ -180,7 +167,7 @@ export default function App() {
       {currentView === 'about' && (
         <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '8px', border: '1px solid #e2e8f0', lineHeight: '1.6' }}>
           <h3>Multi-Tenant Checklist Engine</h3>
-          <p>This tracking engine is designed to accommodate multiple groups seamlessly. Whether tracking weekly food intake or managing workspace opening procedures, each checklist belongs to its designated group.</p>
+          <p>This tracking engine is designed to accommodate multiple groups seamlessly. Select a single group workspace to load its specific branding and items.</p>
         </div>
       )}
 
@@ -189,7 +176,6 @@ export default function App() {
           {!impersonatingUser && (
               <div style={{ background: '#fef3c7', padding: '20px', borderRadius: '8px', border: '1px solid #fcd34d', marginBottom: '20px' }}>
                 <h3 style={{ margin: '0 0 10px 0', color: '#92400e' }}>Personal Connection PIN: <span style={{ letterSpacing: '2px', fontSize: '24px', marginLeft: '10px', background: 'white', padding: '4px 8px', borderRadius: '4px' }}>{myLinkCode}</span></h3>
-                <p style={{ margin: 0, fontSize: '14px', color: '#92400e' }}>Give this PIN to a Group Manager so they can pull you into their group.</p>
               </div>
           )}
           <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '20px' }}>

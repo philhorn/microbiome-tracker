@@ -42,10 +42,12 @@ export default function GroupManager({ groups, token, impersonatingId, apiFetch,
 function GroupCard({ g, token, impersonatingId, apiFetch, refreshTrigger }) {
     const [editingMemberId, setEditingMemberId] = useState(null);
     const [editMemberName, setEditMemberName] = useState('');
+    
     const [editingGroupId, setEditingGroupId] = useState(false);
     const [editGroupName, setEditGroupName] = useState(g.name);
+    const [editAppName, setEditAppName] = useState(g.app_name || '');
+    const [editThemeColor, setEditThemeColor] = useState(g.theme_color || '#2563eb');
     
-    // Tracking Mode Isolation Engine
     const [isIsolated, setIsIsolated] = useState(g.isolate_tracker === 1);
     
     const [createUsername, setCreateUsername] = useState('');
@@ -65,7 +67,6 @@ function GroupCard({ g, token, impersonatingId, apiFetch, refreshTrigger }) {
         newLinks[index][field] = val;
         setBulkLinks(newLinks);
     };
-    
     const addBulkRow = () => setBulkLinks([...bulkLinks, { username: '', linkCode: '' }]);
     const removeBulkRow = (index) => setBulkLinks(bulkLinks.filter((_, i) => i !== index));
 
@@ -73,21 +74,14 @@ function GroupCard({ g, token, impersonatingId, apiFetch, refreshTrigger }) {
         e.preventDefault();
         const toAdd = bulkLinks.filter(l => l.username.trim() !== '' && l.linkCode.trim() !== '');
         if (toAdd.length === 0) return;
-
         const res = await apiFetch(`/api/groups/${g.id}/add_users_bulk`, token, impersonatingId, { method: 'POST', body: JSON.stringify({ users: toAdd }) });
         const data = await res.json();
-        
-        if (data.success) { 
-            setBulkLinks([{ username: '', linkCode: '' }]); 
-            refreshTrigger(); 
-            if (data.errors && data.errors.length > 0) alert(`Added ${data.added} users.\n\nFailed to add:\n${data.errors.join('\n')}`);
-            else alert(`Successfully added ${data.added} user(s)!`);
-        } else alert(data.error);
+        if (data.success) { setBulkLinks([{ username: '', linkCode: '' }]); refreshTrigger(); alert(`Added ${data.added} users.`); } else alert(data.error);
     };
 
-    const saveGroupName = async () => {
+    const saveGroupSettings = async () => {
         if (!editGroupName.trim()) return;
-        await apiFetch(`/api/groups/${g.id}`, token, impersonatingId, { method: 'PUT', body: JSON.stringify({ name: editGroupName.trim() }) });
+        await apiFetch(`/api/groups/${g.id}`, token, impersonatingId, { method: 'PUT', body: JSON.stringify({ name: editGroupName.trim(), appName: editAppName.trim() || null, themeColor: editThemeColor || null }) });
         setEditingGroupId(false); refreshTrigger();
     };
 
@@ -121,21 +115,28 @@ function GroupCard({ g, token, impersonatingId, apiFetch, refreshTrigger }) {
 
     return (
         <div style={{ background: 'white', padding: '15px', borderRadius: '8px', border: '2px solid #cbd5e1', marginBottom: '10px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px', marginBottom: '15px', flexWrap: 'wrap', gap: '10px' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1px solid #e2e8f0', paddingBottom: '15px', marginBottom: '15px', flexWrap: 'wrap', gap: '15px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', flexGrow: 1 }}>
                     {editingGroupId ? (
-                        <div style={{ display: 'flex', gap: '8px' }}>
-                            <input value={editGroupName} onChange={e=>setEditGroupName(e.target.value)} className="form-input" style={{ width: '150px', padding: '4px' }}/>
-                            <button onClick={saveGroupName} style={{ padding: '4px 8px', background: '#10b981', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Save</button>
-                            <button onClick={()=>setEditingGroupId(false)} style={{ padding: '4px 8px', background: '#64748b', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Cancel</button>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', background: '#f8fafc', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                            <label style={{ display: 'flex', flexDirection: 'column', fontSize: '12px', fontWeight: 'bold' }}>Group Name: <input value={editGroupName} onChange={e=>setEditGroupName(e.target.value)} className="form-input"/></label>
+                            <label style={{ display: 'flex', flexDirection: 'column', fontSize: '12px', fontWeight: 'bold' }}>Custom App Name: <input value={editAppName} onChange={e=>setEditAppName(e.target.value)} placeholder="Default Global" className="form-input"/></label>
+                            <label style={{ display: 'flex', flexDirection: 'column', fontSize: '12px', fontWeight: 'bold' }}>Theme Color: <input type="color" value={editThemeColor} onChange={e=>setEditThemeColor(e.target.value)} style={{ padding: 0, height: '35px', width: '50px', cursor: 'pointer', border: '1px solid #cbd5e1', borderRadius: '4px' }}/></label>
+                            <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
+                                <button onClick={saveGroupSettings} style={{ padding: '8px 12px', background: '#10b981', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>Save</button>
+                                <button onClick={()=>setEditingGroupId(false)} style={{ padding: '8px 12px', background: '#64748b', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Cancel</button>
+                            </div>
                         </div>
                     ) : (
-                        <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            {g.name}
-                            <button onClick={() => { setEditingGroupId(true); setEditGroupName(g.name); }} style={{ fontSize: '12px', padding: '2px 8px', background: '#e2e8f0', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Edit Name</button>
-                        </h3>
+                        <div>
+                            <h3 style={{ margin: '0 0 5px 0', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                {g.name}
+                                <button onClick={() => { setEditingGroupId(true); setEditGroupName(g.name); setEditAppName(g.app_name || ''); setEditThemeColor(g.theme_color || '#2563eb'); }} style={{ fontSize: '12px', padding: '4px 8px', background: '#e2e8f0', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Edit Settings</button>
+                            </h3>
+                            {g.app_name && <div style={{ fontSize: '12px', color: '#64748b' }}>Custom Branding: <strong>{g.app_name}</strong> <span style={{display: 'inline-block', width: '12px', height: '12px', background: g.theme_color, borderRadius: '50%', marginLeft: '5px', verticalAlign: 'middle'}}></span></div>}
+                        </div>
                     )}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '14px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '14px', marginTop: '5px' }}>
                         <button onClick={toggleIsolation} style={{ padding: '4px 12px', borderRadius: '15px', border: '1px solid #cbd5e1', background: isIsolated ? '#fef2f2' : '#f0fdf4', color: isIsolated ? '#991b1b' : '#166534', cursor: 'pointer', fontWeight: 'bold' }}>
                             {isIsolated ? '🔒 Isolated Checklist' : '🌐 Unified Checklist'}
                         </button>
@@ -180,16 +181,13 @@ function GroupCard({ g, token, impersonatingId, apiFetch, refreshTrigger }) {
                         <button type="submit" className="form-btn" style={{ background: '#3b82f6', flexBasis: '100%' }}>Create Account</button>
                     </div>
                 </form>
-
                 <form onSubmit={addExistingUsersBulk} style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '10px', background: '#f1f5f9', borderRadius: '4px', flexGrow: 1 }}>
                     <strong style={{ fontSize: '14px', color: '#475569' }}>Add Existing User(s):</strong>
                     {bulkLinks.map((link, idx) => (
                         <div key={idx} style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
                             <input type="text" placeholder="Their Username" value={link.username} onChange={e => handleBulkChange(idx, 'username', e.target.value)} required={idx === 0} className="form-input"/>
                             <input type="text" placeholder="Their Personal PIN" value={link.linkCode} onChange={e => handleBulkChange(idx, 'linkCode', e.target.value)} required={idx === 0} className="form-input"/>
-                            {bulkLinks.length > 1 && (
-                                <button type="button" onClick={() => removeBulkRow(idx)} style={{ padding: '8px 12px', background: '#fca5a5', color: '#7f1d1d', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>X</button>
-                            )}
+                            {bulkLinks.length > 1 && <button type="button" onClick={() => removeBulkRow(idx)} style={{ padding: '8px 12px', background: '#fca5a5', color: '#7f1d1d', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>X</button>}
                         </div>
                     ))}
                     <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>

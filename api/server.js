@@ -34,7 +34,7 @@ let db;
         CREATE TABLE IF NOT EXISTS active_week (id INTEGER PRIMARY KEY AUTOINCREMENT, week_start_date TEXT);
         CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, week_id INTEGER, food_item TEXT, group_id INTEGER, FOREIGN KEY(user_id) REFERENCES users(id));
         CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
-        CREATE TABLE IF NOT EXISTS groups (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, join_code TEXT UNIQUE, isolate_tracker INTEGER DEFAULT 0);
+        CREATE TABLE IF NOT EXISTS groups (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, join_code TEXT UNIQUE, isolate_tracker INTEGER DEFAULT 0, app_name TEXT, theme_color TEXT);
         CREATE TABLE IF NOT EXISTS group_members (group_id INTEGER, user_id INTEGER, sort_order INTEGER DEFAULT 0, PRIMARY KEY(group_id, user_id));
         CREATE TABLE IF NOT EXISTS foods (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, category TEXT, group_id INTEGER);
         
@@ -202,7 +202,7 @@ app.get('/api/groups/grid', authenticate, async (req, res) => {
     }
     
     const groupIds = myGroups.map(g => g.group_id);
-    const groups = await db.all(`SELECT id, name, join_code, isolate_tracker FROM groups WHERE id IN (${groupIds.join(',')})`);
+    const groups = await db.all(`SELECT id, name, join_code, isolate_tracker, app_name, theme_color FROM groups WHERE id IN (${groupIds.join(',')})`);
     const members = await db.all(`SELECT gm.group_id, u.id, u.display_name as name, gm.sort_order FROM group_members gm JOIN users u ON gm.user_id = u.id WHERE gm.group_id IN (${groupIds.join(',')}) ORDER BY gm.group_id, gm.sort_order ASC, u.id ASC`);
     
     const formattedGroups = groups.map(g => ({ ...g, members: members.filter(m => m.group_id === g.id) }));
@@ -249,7 +249,7 @@ app.post('/api/groups/join', authenticate, async (req, res) => {
 
 app.put('/api/groups/:groupId', authenticate, async (req, res) => {
     if (req.userRole !== 'parent' && req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
-    await db.run('UPDATE groups SET name = ? WHERE id = ?', [req.body.name, req.params.groupId]);
+    await db.run('UPDATE groups SET name = ?, app_name = ?, theme_color = ? WHERE id = ?', [req.body.name, req.body.appName, req.body.themeColor, req.params.groupId]);
     res.json({ success: true });
 });
 
