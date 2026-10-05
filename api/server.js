@@ -21,6 +21,9 @@ const ADMIN_CRED_FILE = path.join(__dirname, 'admin_credentials.txt');
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+
+// FIX: Trust Cloudflare Tunnel Proxy for Rate Limiting
+app.set('trust proxy', 1);
 const registerLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 10 });
 
 let db;
@@ -36,7 +39,7 @@ let db;
         CREATE TABLE IF NOT EXISTS foods (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, category TEXT, group_id INTEGER);
         
         INSERT INTO active_week (id, week_start_date) SELECT 1, date('now', 'localtime', '-7 days') WHERE NOT EXISTS (SELECT 1 FROM active_week WHERE id = 1);
-        INSERT OR IGNORE INTO settings (key, value) VALUES ('max_attempts', '5'), ('lockout_mins', '15'), ('rollover_day', '0');
+        INSERT OR IGNORE INTO settings (key, value) VALUES ('max_attempts', '5'), ('lockout_mins', '15'), ('rollover_day', '0'), ('app_name', 'Microbiome Tracker'), ('theme_color', '#ef4444');
     `);
 
     const adminExists = await db.get("SELECT 1 FROM users WHERE role = 'admin'");
@@ -66,11 +69,9 @@ const authenticate = (req, res, next) => {
     });
 };
 
-// --- GITHUB WEBHOOK LISTENER ---
 app.post('/api/webhook', (req, res) => {
     const authHeader = req.headers['x-github-event'];
     if (!authHeader) return res.status(403).send('Denied');
-
     res.status(200).send('Build triggered');
     console.log('GitHub Push detected. Triggering deployment...');
     exec('/root/update.sh', (err, stdout, stderr) => {
@@ -78,9 +79,14 @@ app.post('/api/webhook', (req, res) => {
         else console.log(`Deployment successful:\n${stdout}`);
     });
 });
-// -------------------------------
 
 app.get('/api/setup-status', (req, res) => { res.json({ needsSetup: fs.existsSync(ADMIN_CRED_FILE) }); });
+
+app.get('/api/public-config', async (req, res) => {
+    const settings = {};
+    (await db.all("SELECT key, value FROM settings WHERE key IN ('app_name', 'theme_color')")).forEach(r => settings[r.key] = r.value);
+    res.json({ appName: settings.app_name || 'Microbiome Tracker', themeColor: settings.theme_color || '#ef4444' });
+});
 
 app.post('/api/register', registerLimiter, async (req, res) => {
     const rawUsername = req.body.username;

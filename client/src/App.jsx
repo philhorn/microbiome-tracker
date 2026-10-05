@@ -1,4 +1,3 @@
-import { APP_VERSION } from "./version";
 import React, { useState, useEffect } from 'react';
 import { apiFetch } from './api';
 import Auth from './Auth';
@@ -6,7 +5,7 @@ import TrackerGrid from './TrackerGrid';
 import GroupManager from './GroupManager';
 import AdminPanel from './AdminPanel';
 import ListManager from './ListManager';
-
+import { APP_VERSION } from './version';
 
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem('token'));
@@ -27,7 +26,12 @@ export default function App() {
   const [selectedWeek, setSelectedWeek] = useState(null);
   const [gridData, setGridData] = useState({});
   const [adminUsers, setAdminUsers] = useState([]);
+  
+  // BRANDING STATE
   const [sysSettings, setSysSettings] = useState({});
+  const [appName, setAppName] = useState('Tracker');
+  const [themeColor, setThemeColor] = useState('#2563eb');
+
   const [listItems, setListItems] = useState([]);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [setupNotice, setSetupNotice] = useState(false);
@@ -44,6 +48,19 @@ export default function App() {
   const hardReset = () => { localStorage.clear(); window.location.reload(); };
 
   useEffect(() => { fetch('/api/setup-status').then(r => r.json()).then(d => setSetupNotice(d.needsSetup)).catch(() => {}); }, []);
+
+  // Fetch Public Branding regardless of Token
+  useEffect(() => {
+    fetch('/api/public-config')
+        .then(r => r.json())
+        .then(data => { 
+            setAppName(data.appName); 
+            setThemeColor(data.themeColor); 
+            document.documentElement.style.setProperty('--theme-color', data.themeColor);
+            document.title = data.appName;
+        })
+        .catch(() => {});
+  }, [refreshTrigger]);
 
   useEffect(() => {
     if (token) {
@@ -119,11 +136,12 @@ export default function App() {
   return (
     <div className="app-container" style={{ fontFamily: 'system-ui', maxWidth: '1200px', margin: '0 auto', padding: '15px' }}>
       <style>{`
+        :root { --theme-color: ${themeColor}; }
         .form-group { display: flex; gap: 8px; background: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; borderRadius: 8px; flex-grow: 1; flex-wrap: wrap; align-items: center; }
         .form-input { padding: 8px; border-radius: 4px; border: 1px solid #cbd5e1; flex: 1 1 120px; }
-        .form-btn { padding: 8px 16px; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; flex: 1 1 100%; }
+        .form-btn { padding: 8px 16px; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; flex: 1 1 100%; background: var(--theme-color); }
         .nav-btn { padding: 8px 16px; border: none; background: none; cursor: pointer; font-weight: bold; color: #64748b; border-bottom: 2px solid transparent; }
-        .nav-btn.active { color: #2563eb; border-bottom: 2px solid #2563eb; }
+        .nav-btn.active { color: var(--theme-color); border-bottom: 2px solid var(--theme-color); }
         .food-col { position: sticky; left: 0; z-index: 30; background: white; }
         .person-col { position: sticky; top: 0; z-index: 20; }
         .top-left-corner { position: sticky; top: 0; left: 0; z-index: 40; background: #f8fafc; }
@@ -138,6 +156,11 @@ export default function App() {
         }
       `}</style>
       
+      {/* BRANDING HEADER */}
+      <div style={{ display: 'flex', alignItems: 'center', marginBottom: '20px', gap: '15px', borderBottom: '2px solid #e2e8f0', paddingBottom: '15px' }}>
+         <h1 style={{ margin: 0, color: 'var(--theme-color)' }}>{appName}</h1>
+      </div>
+
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '15px' }}>
         <div>
           <h2 style={{ margin: '0 0 4px 0' }}>Hi, {activeName} <span style={{fontSize: '16px', color: '#64748b', fontWeight: 'normal'}}>({activeUsername})</span></h2>
@@ -179,7 +202,7 @@ export default function App() {
             <form onSubmit={updateProfile} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               <label><strong>Display Name:</strong> <input type="text" value={profileName} onChange={e => setProfileName(e.target.value)} required className="form-input" style={{ width: '100%', marginTop: '4px' }}/></label>
               <label><strong>New Password:</strong> <input type="password" placeholder="Leave blank to keep current password" value={profilePass} onChange={e => setProfilePass(e.target.value)} className="form-input" style={{ width: '100%', marginTop: '4px' }}/></label>
-              <button type="submit" className="form-btn" style={{ background: '#2563eb' }}>Save Changes</button>
+              <button type="submit" className="form-btn">Save Changes</button>
             </form>
           </div>
           <div style={{ background: '#fee2e2', padding: '20px', borderRadius: '8px', border: '1px solid #fca5a5' }}>
@@ -201,7 +224,7 @@ export default function App() {
           <div style={{ display: 'flex', gap: '15px', alignItems: 'center', marginBottom: '15px', flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', flexGrow: 1 }}>
                 {groups.map(g => (
-                    <button key={g.id} onClick={() => setVisibleGroupIds(prev => prev.includes(g.id) ? prev.filter(id => id !== g.id) : [...prev, g.id])} style={{ padding: '6px 12px', borderRadius: '20px', cursor: 'pointer', border: 'none', fontWeight: 'bold', fontSize: '14px', background: visibleGroupIds.includes(g.id) ? '#3b82f6' : '#e2e8f0', color: visibleGroupIds.includes(g.id) ? 'white' : '#64748b' }}>
+                    <button key={g.id} onClick={() => setVisibleGroupIds(prev => prev.includes(g.id) ? prev.filter(id => id !== g.id) : [...prev, g.id])} style={{ padding: '6px 12px', borderRadius: '20px', cursor: 'pointer', border: 'none', fontWeight: 'bold', fontSize: '14px', background: visibleGroupIds.includes(g.id) ? 'var(--theme-color)' : '#e2e8f0', color: visibleGroupIds.includes(g.id) ? 'white' : '#64748b' }}>
                         {visibleGroupIds.includes(g.id) ? '✓ ' : '+ '} {g.name}
                     </button>
                 ))}

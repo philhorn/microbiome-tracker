@@ -1,6 +1,5 @@
-import { APP_VERSION } from "./version";
-import React, { useState } from 'react';
-
+import React, { useState, useEffect } from 'react';
+import { APP_VERSION } from './version';
 
 export default function Auth({ setAuthData, setupNotice }) {
     const [isLoginView, setIsLoginView] = useState(true);
@@ -8,6 +7,16 @@ export default function Auth({ setAuthData, setupNotice }) {
     const [displayName, setDisplayName] = useState('');
     const [password, setPassword] = useState('');
     const [isParentReg, setIsParentReg] = useState(false);
+    
+    const [appName, setAppName] = useState('Loading...');
+    const [themeColor, setThemeColor] = useState('#2563eb');
+
+    useEffect(() => {
+        fetch('/api/public-config')
+            .then(r => r.json())
+            .then(data => { setAppName(data.appName); setThemeColor(data.themeColor); })
+            .catch(() => { setAppName('Tracker'); });
+    }, []);
 
     const authSubmit = async (e) => {
         e.preventDefault();
@@ -16,11 +25,9 @@ export default function Auth({ setAuthData, setupNotice }) {
         try {
             const res = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
             const data = await res.json();
-            if (data.token) {
-                setAuthData(data.token, data.role, data.name, data.username, data.link_code, data.id);
-            } else if (!isLoginView && data.success) {
-                setIsLoginView(true); alert("Registered! Please log in.");
-            } else { alert(data.error); }
+            if (data.token) { setAuthData(data.token, data.role, data.name, data.username, data.link_code, data.id); } 
+            else if (!isLoginView && data.success) { setIsLoginView(true); alert("Registered! Please log in."); } 
+            else { alert(data.error); }
         } catch(err) { alert("Network Error"); }
     };
 
@@ -37,15 +44,18 @@ export default function Auth({ setAuthData, setupNotice }) {
                 <code style={{ background: '#fde68a', padding: '4px', display: 'block', marginTop: '8px', borderRadius: '4px' }}>cat /var/www/microbiome-app/api/admin_credentials.txt</code>
                 </div>
             )}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '20px' }}>
+                <h1 style={{ margin: 0, color: themeColor }}>{appName}</h1>
+            </div>
             <h2 style={{ marginTop: 0 }}>{isLoginView ? "Login" : "Register"}</h2>
             <form onSubmit={authSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 <input type="text" placeholder="Username" value={username} onChange={e => setUsername(e.target.value)} required style={{ padding: '10px', borderRadius: '4px', border: '1px solid #cbd5e1' }}/>
                 {!isLoginView && <input type="text" placeholder="Display Name" value={displayName} onChange={e => setDisplayName(e.target.value)} required style={{ padding: '10px', borderRadius: '4px', border: '1px solid #cbd5e1' }}/>}
                 <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} required style={{ padding: '10px', borderRadius: '4px', border: '1px solid #cbd5e1' }}/>
                 {!isLoginView && <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}><input type="checkbox" checked={isParentReg} onChange={e => setIsParentReg(e.target.checked)}/> Manager Account</label>}
-                <button type="submit" style={{ padding: '10px', background: '#2563eb', color: 'white', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer' }}>Submit</button>
+                <button type="submit" style={{ padding: '10px', background: themeColor, color: 'white', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer' }}>Submit</button>
             </form>
-            <p style={{ cursor: 'pointer', color: '#2563eb', marginTop: '16px', textAlign: 'center' }} onClick={() => setIsLoginView(!isLoginView)}>{isLoginView ? "Need an account? Register" : "Have an account? Login"}</p>
+            <p style={{ cursor: 'pointer', color: themeColor, marginTop: '16px', textAlign: 'center' }} onClick={() => setIsLoginView(!isLoginView)}>{isLoginView ? "Need an account? Register" : "Have an account? Login"}</p>
             <div style={{ textAlign: 'center', fontSize: '12px', color: '#94a3b8', marginTop: '20px' }}>v{APP_VERSION}</div>
         </div>
     );
