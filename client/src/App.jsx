@@ -120,13 +120,13 @@ export default function App() {
     <div className="app-container" style={{ fontFamily: 'system-ui', maxWidth: '1200px', margin: '0 auto', padding: '15px' }}>
       <style>{`
         :root { --theme-color: ${activeThemeColor}; transition: all 0.3s ease; }
-        .form-group { display: flex; gap: 8px; background: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; borderRadius: 8px; flex-grow: 1; flex-wrap: wrap; align-items: center; }
+        .form-group { display: flex; gap: 8px; background: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 8px; flex-grow: 1; flex-wrap: wrap; align-items: center; }
         .form-input { padding: 8px; border-radius: 4px; border: 1px solid #cbd5e1; flex: 1 1 120px; }
         .form-btn { padding: 8px 16px; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; flex: 1 1 100%; background: var(--theme-color); }
         .nav-btn { padding: 8px 16px; border: none; background: none; cursor: pointer; font-weight: bold; color: #64748b; border-bottom: 2px solid transparent; }
         .nav-btn.active { color: var(--theme-color); border-bottom: 2px solid var(--theme-color); }
         .dropdown { position: relative; display: inline-block; }
-        .dropdown-content { display: none; position: absolute; right: 0; background-color: #white; min-width: 160px; box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2); z-index: 50; border-radius: 6px; border: 1px solid #e2e8f0; background: white; }
+        .dropdown-content { display: none; position: absolute; right: 0; background-color: white; min-width: 160px; box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2); z-index: 50; border-radius: 6px; border: 1px solid #e2e8f0; }
         .dropdown-content button { color: #334155; padding: 10px 16px; text-decoration: none; display: block; width: 100%; text-align: left; background: none; border: none; cursor: pointer; font-weight: 500; }
         .dropdown-content button:hover { background-color: #f1f5f9; color: var(--theme-color); }
         .dropdown:hover .dropdown-content { display: block; }
@@ -151,7 +151,6 @@ export default function App() {
             </div>
           )}
           
-          {/* STREAMLINED NAVIGATION BAR */}
           <div style={{ display: 'flex', gap: '15px', alignItems: 'center', borderBottom: '1px solid #e2e8f0', marginTop: '10px' }}>
             <button className={`nav-btn ${currentView === 'tracker' ? 'active' : ''}`} onClick={() => setCurrentView('tracker')}>Checklists</button>
             {(activeRole === 'parent' || activeRole === 'admin') && <button className={`nav-btn ${currentView === 'groups' ? 'active' : ''}`} onClick={() => setCurrentView('groups')}>Group Settings</button>}
@@ -234,7 +233,7 @@ export default function App() {
         </>
       )}
 
-      <div style={{ textAlign: 'center', fontSize: '12px', color: '#94a3b8', marginTop: '30px' %>v{APP_VERSION}</div>
+      <div style={{ textAlign: 'center', fontSize: '12px', color: '#94a3b8', marginTop: '30px' }}>v{APP_VERSION}</div>
     </div>
   );
 }
