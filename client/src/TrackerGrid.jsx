@@ -61,7 +61,6 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
         if (action === 'all') {
             const currentlyChecked = ids.filter(id => (next[group.id]?.[id] || []).includes(itemName));
             setUndoMemory(prev => ({ ...prev, [memKey]: currentlyChecked }));
-            
             ids.forEach(id => {
                 Object.keys(next).forEach(gid => {
                     const g = groups.find(x => x.id.toString() === gid.toString());
@@ -72,6 +71,19 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
                     }
                 });
             });
+        } else if (action === 'clear') {
+            ids.forEach(id => {
+                Object.keys(next).forEach(gid => {
+                    const g = groups.find(x => x.id.toString() === gid.toString());
+                    if (appliesToAll && g && g.isolate_tracker === 0) {
+                        if (next[gid] && next[gid][id]) next[gid][id] = next[gid][id].filter(i=>i!==itemName);
+                    } else if (gid.toString() === group.id.toString()) {
+                        if (next[gid] && next[gid][id]) next[gid][id] = next[gid][id].filter(i=>i!==itemName);
+                    }
+                });
+            });
+            setUndoMemory(prev => { const n={...prev}; delete n[memKey]; return n; });
+            finalCheckState = false;
         } else if (action === 'revert') {
             const mem = undoMemory[memKey] || [];
             ids.forEach(id => {
@@ -93,19 +105,6 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
             });
             setUndoMemory(prev => { const n={...prev}; delete n[memKey]; return n; });
             finalCheckState = 'revert'; 
-        } else if (action === 'clear') {
-            ids.forEach(id => {
-                Object.keys(next).forEach(gid => {
-                    const g = groups.find(x => x.id.toString() === gid.toString());
-                    if (appliesToAll && g && g.isolate_tracker === 0) {
-                        if (next[gid] && next[gid][id]) next[gid][id] = next[gid][id].filter(i=>i!==itemName);
-                    } else if (gid.toString() === group.id.toString()) {
-                        if (next[gid] && next[gid][id]) next[gid][id] = next[gid][id].filter(i=>i!==itemName);
-                    }
-                });
-            });
-            setUndoMemory(prev => { const n={...prev}; delete n[memKey]; return n; });
-            finalCheckState = false;
         }
         setGridData(next);
 

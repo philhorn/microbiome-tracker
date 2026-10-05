@@ -96,7 +96,7 @@ export default function ListManager({ listItems, groups, activeRole, token, impe
                             <input type="text" value={customCat} onChange={e => setCustomCat(e.target.value)} required className="form-input" />
                         </label>
                     )}
-                    <button type="submit" className="form-btn" style={{ background: '#2563eb', flexBasis: 'auto', height: '35px' }}>Add Item</button>
+                    <button type="submit" className="form-btn" style={{ background: 'var(--theme-color)', flexBasis: 'auto', height: '35px' }}>Add Item</button>
                 </form>
             </div>
 

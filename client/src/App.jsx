@@ -27,7 +27,6 @@ export default function App() {
   const [gridData, setGridData] = useState({});
   const [adminUsers, setAdminUsers] = useState([]);
   
-  // BRANDING STATE
   const [sysSettings, setSysSettings] = useState({});
   const [appName, setAppName] = useState('Tracker');
   const [themeColor, setThemeColor] = useState('#2563eb');
@@ -49,7 +48,6 @@ export default function App() {
 
   useEffect(() => { fetch('/api/setup-status').then(r => r.json()).then(d => setSetupNotice(d.needsSetup)).catch(() => {}); }, []);
 
-  // Fetch Public Branding regardless of Token
   useEffect(() => {
     fetch('/api/public-config')
         .then(r => r.json())
@@ -58,8 +56,7 @@ export default function App() {
             setThemeColor(data.themeColor); 
             document.documentElement.style.setProperty('--theme-color', data.themeColor);
             document.title = data.appName;
-        })
-        .catch(() => {});
+        }).catch(() => {});
   }, [refreshTrigger]);
 
   useEffect(() => {
@@ -156,7 +153,6 @@ export default function App() {
         }
       `}</style>
       
-      {/* BRANDING HEADER */}
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: '20px', gap: '15px', borderBottom: '2px solid #e2e8f0', paddingBottom: '15px' }}>
          <h1 style={{ margin: 0, color: 'var(--theme-color)' }}>{appName}</h1>
       </div>
@@ -205,13 +201,6 @@ export default function App() {
               <button type="submit" className="form-btn">Save Changes</button>
             </form>
           </div>
-          <div style={{ background: '#fee2e2', padding: '20px', borderRadius: '8px', border: '1px solid #fca5a5' }}>
-            <h3 style={{ marginTop: 0, color: '#991b1b' }}>Danger Zone</h3>
-            <div style={{ display: 'flex', gap: '10px' }}>
-              {activeRole === 'user' && <button onClick={handleUpgrade} style={{ padding: '8px 12px', background: '#8b5cf6', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Upgrade to Group Manager</button>}
-              <button onClick={handleDeleteSelf} style={{ padding: '8px 12px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Delete Account</button>
-            </div>
-          </div>
         </div>
       )}
 
@@ -236,7 +225,6 @@ export default function App() {
                     <option value="CHECKED">✅ Filter: Checked Only</option>
                     <option value="UNCHECKED">❌ Filter: Unchecked Only</option>
                 </select>
-
                 <select value={sortMode} onChange={(e) => setSortMode(e.target.value)} style={{ padding: '8px', borderRadius: '4px', border: '1px solid #cbd5e1', background: '#f8fafc', fontWeight: 'bold', color: '#1e293b' }}>
                     <option value="A-Z">🔤 Sort: A-Z</option>
                     <option value="CHECKED_FIRST">✅ Sort: Checked First</option>
