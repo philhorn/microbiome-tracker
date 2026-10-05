@@ -4,6 +4,7 @@ const columnColors = ['#f0f9ff', '#f0fdf4', '#fefce8', '#fff1f2', '#f3e8ff', '#e
 
 export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGridData, listItems, searchTerm, filterMode, sortMode, effectiveUserId, activeRole, impersonatingId, selectedWeek, apiFetch, token }) {
     const [collapsedCats, setCollapsedCats] = useState({});
+    const [collapsedGroups, setCollapsedGroups] = useState({});
     const [undoMemory, setUndoMemory] = useState({});
     const [colWidths, setColWidths] = useState(() => {
         const saved = localStorage.getItem('colWidths');
@@ -130,15 +131,16 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
     };
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
             <style>{`
                 .tracker-table-container {
-                    max-height: 65vh;
-                    overflow: auto;
+                    overflow-x: auto;
+                    overflow-y: visible;
                     border: 1px solid #cbd5e1;
-                    border-radius: 8px;
+                    border-top: none;
+                    border-bottom-left-radius: 8px;
+                    border-bottom-right-radius: 8px;
                     background: white;
-                    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
                 }
                 .tracker-table {
                     border-collapse: separate;
@@ -146,7 +148,7 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
                     width: 100%;
                     text-align: center;
                 }
-                /* Sticky Member Header Row */
+                /* Sticky Member Header Row (Locks to top of browser window when scrolling page) */
                 .tracker-table th.person-col {
                     position: sticky;
                     top: 0;
@@ -194,94 +196,99 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
                 });
                 
                 const sortedCats = Object.keys(categorized).sort();
+                const isGroupCollapsed = collapsedGroups[group.id];
 
                 return (
-                    <div key={group.id} style={{ border: '1px solid #cbd5e1', borderRadius: '8px', background: 'white', overflow: 'hidden' }}>
-                        <div style={{ background: '#1e293b', color: 'white', padding: '12px 15px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <h3 style={{ margin: 0 }}>{group.name}</h3>
+                    <div key={group.id} style={{ border: '1px solid #cbd5e1', borderRadius: '8px', background: 'white', overflow: 'hidden', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}>
+                        <div onClick={() => setCollapsedGroups({...collapsedGroups, [group.id]: !isGroupCollapsed})} style={{ background: '#1e293b', color: 'white', padding: '14px 15px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', userSelect: 'none' }}>
+                            <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '10px', fontSize: '16px' }}>
+                                <span>{isGroupCollapsed ? '▶' : '▼'}</span> {group.name}
+                            </h3>
                             <span style={{ fontSize: '12px', background: '#334155', padding: '4px 10px', borderRadius: '12px', fontWeight: 'bold' }}>{group.members.length} Members</span>
                         </div>
                         
-                        <div className="tracker-table-container">
-                            <table className="tracker-table">
-                                <thead>
-                                    <tr>
-                                        <th className="food-col-header cell-pad" style={{ width: colWidths['food'] || 160, minWidth: 120, maxWidth: colWidths['food'] || 160, borderBottom: '2px solid #94a3b8', borderRight: '2px solid #94a3b8', textAlign: 'left' }}>
-                                            Task / Item <div className="drag-handle" onMouseDown={(e) => handleDrag(e, 'food', 160)} />
-                                        </th>
-                                        {group.members.map((m, idx) => (
-                                            <th key={m.id} className="person-col cell-pad" style={{ width: colWidths[m.id] || 90, minWidth: 80, maxWidth: colWidths[m.id] || 90, background: columnColors[idx % columnColors.length], borderBottom: '2px solid #94a3b8', borderRight: '1px solid #e2e8f0' }}>
-                                                <span style={{ fontWeight: 'bold' }}>{m.name}</span><br/>
-                                                <span style={{ fontSize: '0.85em', fontWeight: 'normal', color: '#64748b' }}>Score: {gridData[group.id]?.[m.id]?.length || 0}</span>
-                                                <div className="drag-handle" onMouseDown={(e) => handleDrag(e, m.id, 90)} />
+                        {!isGroupCollapsed && (
+                            <div className="tracker-table-container">
+                                <table className="tracker-table">
+                                    <thead>
+                                        <tr>
+                                            <th className="food-col-header cell-pad" style={{ width: colWidths['food'] || 160, minWidth: 120, maxWidth: colWidths['food'] || 160, borderBottom: '2px solid #94a3b8', borderRight: '2px solid #94a3b8', textAlign: 'left' }}>
+                                                Task / Item <div className="drag-handle" onMouseDown={(e) => handleDrag(e, 'food', 160)} />
                                             </th>
-                                        ))}
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {sortedCats.map(category => {
-                                        const catKey = `${group.id}-${category}`;
-                                        
-                                        const sortedItems = categorized[category].sort((a, b) => {
-                                            const aChecked = (gridData[group.id]?.[effectiveUserId] || []).includes(a.name);
-                                            const bChecked = (gridData[group.id]?.[effectiveUserId] || []).includes(b.name);
+                                            {group.members.map((m, idx) => (
+                                                <th key={m.id} className="person-col cell-pad" style={{ width: colWidths[m.id] || 90, minWidth: 80, maxWidth: colWidths[m.id] || 90, background: columnColors[idx % columnColors.length], borderBottom: '2px solid #94a3b8', borderRight: '1px solid #e2e8f0' }}>
+                                                    <span style={{ fontWeight: 'bold' }}>{m.name}</span><br/>
+                                                    <span style={{ fontSize: '0.85em', fontWeight: 'normal', color: '#64748b' }}>Score: {gridData[group.id]?.[m.id]?.length || 0}</span>
+                                                    <div className="drag-handle" onMouseDown={(e) => handleDrag(e, m.id, 90)} />
+                                                </th>
+                                            ))}
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {sortedCats.map(category => {
+                                            const catKey = `${group.id}-${category}`;
                                             
-                                            if (sortMode === 'CHECKED_FIRST') {
-                                                if (aChecked && !bChecked) return -1;
-                                                if (!aChecked && bChecked) return 1;
-                                            } else if (sortMode === 'UNCHECKED_FIRST') {
-                                                if (!aChecked && bChecked) return -1;
-                                                if (aChecked && !bChecked) return 1;
-                                            }
-                                            return a.name.localeCompare(b.name);
-                                        });
-
-                                        return (
-                                        <React.Fragment key={catKey}>
-                                            <tr>
-                                                <td onClick={() => setCollapsedCats({...collapsedCats, [catKey]: !collapsedCats[catKey]})} className="cat-col-cell cell-pad" style={{ borderBottom: '2px solid #94a3b8', borderRight: '2px solid #94a3b8', textAlign: 'left', fontWeight: 'bold', cursor: 'pointer', color: '#0f172a', fontSize: '14px' }}>
-                                                    {collapsedCats[catKey] ? '▶' : '▼'} {category}
-                                                </td>
-                                                {group.members.map(m => (
-                                                    <td key={m.id} className="cell-pad" style={{ background: '#e2e8f0', borderBottom: '2px solid #94a3b8', borderRight: '1px solid #c5cffd' }}></td>
-                                                ))}
-                                            </tr>
-                                            {!collapsedCats[catKey] && sortedItems.map(item => {
-                                                const checkedCount = group.members.filter(m => (gridData[group.id]?.[m.id] || []).includes(item.name)).length;
-                                                let allBtnText = "All", action = 'all', btnColor = '#cbd5e1', hoverTitle = "Check everyone in group";
-                                                const memKey = `${group.id}-${item.name}`;
-
-                                                if (group.members.length > 0 && checkedCount === group.members.length) {
-                                                    if (undoMemory[memKey]) { allBtnText = "Revert"; action = 'revert'; btnColor = '#fde047'; hoverTitle = "Undo 'All'"; } 
-                                                    else { allBtnText = "Clear"; action = 'clear'; btnColor = '#fca5a5'; hoverTitle = "Uncheck everyone"; }
-                                                }
+                                            const sortedItems = categorized[category].sort((a, b) => {
+                                                const aChecked = (gridData[group.id]?.[effectiveUserId] || []).includes(a.name);
+                                                const bChecked = (gridData[group.id]?.[effectiveUserId] || []).includes(b.name);
                                                 
-                                                const isGlobal = item.group_id === null;
-                                                const isUnified = group.isolate_tracker === 0;
+                                                if (sortMode === 'CHECKED_FIRST') {
+                                                    if (aChecked && !bChecked) return -1;
+                                                    if (!aChecked && bChecked) return 1;
+                                                } else if (sortMode === 'UNCHECKED_FIRST') {
+                                                    if (!aChecked && bChecked) return -1;
+                                                    if (aChecked && !bChecked) return 1;
+                                                }
+                                                return a.name.localeCompare(b.name);
+                                            });
 
-                                                return (
-                                                <tr key={item.name}>
-                                                    <td className="food-col-cell cell-pad" style={{ borderBottom: '1px solid #f1f5f9', borderRight: '2px solid #cbd5e1', textAlign: 'left', fontWeight: '500', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                                        <span style={{ color: isGlobal ? '#1d4ed8' : 'inherit' }}>
-                                                            {item.name} {isGlobal && <span style={{fontSize: '10px', background: '#dbeafe', padding: '2px 4px', borderRadius: '4px', marginLeft: '6px', fontWeight: 'bold'}}>Global</span>}
-                                                        </span>
-                                                        {(activeRole === 'parent' || activeRole === 'admin') && group.members.length > 0 && (
-                                                            <button onClick={() => handleCheckAll(item.name, action, group, isGlobal)} title={hoverTitle} style={{ fontSize: '12px', padding: '4px 8px', background: btnColor, border: 'none', borderRadius: '4px', cursor: 'pointer', minWidth: '45px' }}>{allBtnText}</button>
-                                                        )}
+                                            return (
+                                            <React.Fragment key={catKey}>
+                                                <tr>
+                                                    <td onClick={() => setCollapsedCats({...collapsedCats, [catKey]: !collapsedCats[catKey]})} className="cat-col-cell cell-pad" style={{ borderBottom: '2px solid #94a3b8', borderRight: '2px solid #94a3b8', textAlign: 'left', fontWeight: 'bold', cursor: 'pointer', color: '#0f172a', fontSize: '14px' }}>
+                                                        {collapsedCats[catKey] ? '▶' : '▼'} {category}
                                                     </td>
-                                                    {group.members.map((m, idx) => (
-                                                        <td key={m.id} className="cell-pad" onClick={() => handleToggle(m.id, item.name, group.id, isGlobal, isUnified)} style={{ background: columnColors[idx % columnColors.length], borderBottom: '1px solid #f1f5f9', borderRight: '1px solid #e2e8f0', cursor: 'pointer' }}>
-                                                            <input type="checkbox" checked={(gridData[group.id]?.[m.id] || []).includes(item.name)} readOnly style={{ width: '22px', height: '22px', pointerEvents: 'none' }} />
-                                                        </td>
+                                                    {group.members.map(m => (
+                                                        <td key={m.id} className="cell-pad" style={{ background: '#e2e8f0', borderBottom: '2px solid #94a3b8', borderRight: '1px solid #c5cffd' }}></td>
                                                     ))}
                                                 </tr>
-                                                )
-                                            })}
-                                        </React.Fragment>
-                                    )})}
-                                </tbody>
-                            </table>
-                        </div>
+                                                {!collapsedCats[catKey] && sortedItems.map(item => {
+                                                    const checkedCount = group.members.filter(m => (gridData[group.id]?.[m.id] || []).includes(item.name)).length;
+                                                    let allBtnText = "All", action = 'all', btnColor = '#cbd5e1', hoverTitle = "Check everyone in group";
+                                                    const memKey = `${group.id}-${item.name}`;
+
+                                                    if (group.members.length > 0 && checkedCount === group.members.length) {
+                                                        if (undoMemory[memKey]) { allBtnText = "Revert"; action = 'revert'; btnColor = '#fde047'; hoverTitle = "Undo 'All'"; } 
+                                                        else { allBtnText = "Clear"; action = 'clear'; btnColor = '#fca5a5'; hoverTitle = "Uncheck everyone"; }
+                                                    }
+                                                    
+                                                    const isGlobal = item.group_id === null;
+                                                    const isUnified = group.isolate_tracker === 0;
+
+                                                    return (
+                                                    <tr key={item.name}>
+                                                        <td className="food-col-cell cell-pad" style={{ borderBottom: '1px solid #f1f5f9', borderRight: '2px solid #cbd5e1', textAlign: 'left', fontWeight: '500', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                            <span style={{ color: isGlobal ? '#1d4ed8' : 'inherit' }}>
+                                                                {item.name} {isGlobal && <span style={{fontSize: '10px', background: '#dbeafe', padding: '2px 4px', borderRadius: '4px', marginLeft: '6px', fontWeight: 'bold'}}>Global</span>}
+                                                            </span>
+                                                            {(activeRole === 'parent' || activeRole === 'admin') && group.members.length > 0 && (
+                                                                <button onClick={() => handleCheckAll(item.name, action, group, isGlobal)} title={hoverTitle} style={{ fontSize: '12px', padding: '4px 8px', background: btnColor, border: 'none', borderRadius: '4px', cursor: 'pointer', minWidth: '45px' }}>{allBtnText}</button>
+                                                            )}
+                                                        </td>
+                                                        {group.members.map((m, idx) => (
+                                                            <td key={m.id} className="cell-pad" onClick={() => handleToggle(m.id, item.name, group.id, isGlobal, isUnified)} style={{ background: columnColors[idx % columnColors.length], borderBottom: '1px solid #f1f5f9', borderRight: '1px solid #e2e8f0', cursor: 'pointer' }}>
+                                                                <input type="checkbox" checked={(gridData[group.id]?.[m.id] || []).includes(item.name)} readOnly style={{ width: '22px', height: '22px', pointerEvents: 'none' }} />
+                                                            </td>
+                                                        ))}
+                                                    </tr>
+                                                    )
+                                                })}
+                                            </React.Fragment>
+                                        )})}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
                     </div>
                 );
             })}
