@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+client/node_modules/
+api/node_modules/
+
+# Build artifacts & outputs
+dist/
+client/dist/
+build/
+
+# Environment variables & sensitive data
+.env
+api/.env
+admin_credentials.txt
+database.sqlite
+api/database.sqlite
+
+# OS & Editor files
+.DS_Store
+.vscode/
+*.log
