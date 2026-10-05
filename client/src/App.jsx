@@ -102,17 +102,9 @@ export default function App() {
 
   if (!token) return <Auth setAuthData={setAuthData} setupNotice={setupNotice} />;
 
-  // Dynamic Branding: Use the first visible group's branding if available, else fallback to global
-  let activeAppName = globalAppName;
-  let activeThemeColor = globalThemeColor;
-
-  if (visibleGroupIds.length > 0) {
-      const firstVisibleGroup = groups.find(g => g.id === visibleGroupIds[0]);
-      if (firstVisibleGroup) {
-          if (firstVisibleGroup.app_name) activeAppName = firstVisibleGroup.app_name;
-          if (firstVisibleGroup.theme_color) activeThemeColor = firstVisibleGroup.theme_color;
-      }
-  }
+  // Top header strictly locked to global system theme color and global app name
+  const activeAppName = globalAppName;
+  const activeThemeColor = globalThemeColor;
 
   document.documentElement.style.setProperty('--theme-color', activeThemeColor);
   document.title = activeAppName;
@@ -122,7 +114,21 @@ export default function App() {
       <style>{`
         :root { --theme-color: ${activeThemeColor}; transition: all 0.3s ease; }
         .form-group { display: flex; gap: 10px; background: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 8px; flex-grow: 1; flex-wrap: wrap; align-items: center; }
-        .form-input { height: 38px; padding: 6px 12px; border-radius: 6px; border: 1px solid #cbd5e1; font-size: 14px; box-sizing: border-box; flex: 1 1 180px; background: white; }
+        
+        /* STRICT SINGLE-LINE PROFESSIONAL INPUT FIX */
+        input.form-input, select.form-input, textarea.form-input { 
+          height: 38px !important; 
+          min-height: 38px !important; 
+          max-height: 38px !important; 
+          padding: 6px 12px !important; 
+          border-radius: 6px !important; 
+          border: 1px solid #cbd5e1 !important; 
+          font-size: 14px !important; 
+          box-sizing: border-box !important; 
+          background: white !important;
+          width: 100% !important;
+        }
+        
         .form-btn { height: 38px; padding: 0 16px; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; background: var(--theme-color); }
         .nav-btn { padding: 8px 16px; border: none; background: none; cursor: pointer; font-weight: bold; color: #64748b; border-bottom: 2px solid transparent; }
         .nav-btn.active { color: var(--theme-color); border-bottom: 2px solid var(--theme-color); }
@@ -134,7 +140,6 @@ export default function App() {
         @media (max-width: 768px) {
           .app-container { padding: 10px; }
           .form-group { flex-direction: column; align-items: stretch; }
-          .form-input { width: 100%; }
         }
       `}</style>
       
@@ -206,26 +211,26 @@ export default function App() {
           <div style={{ display: 'flex', gap: '15px', alignItems: 'center', marginBottom: '15px', flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', flexGrow: 1 }}>
                 {groups.map(g => (
-                    <button key={g.id} onClick={() => setVisibleGroupIds(prev => prev.includes(g.id) ? prev.filter(id => id !== g.id) : [...prev, g.id])} style={{ height: '38px', padding: '0 14px', borderRadius: '20px', cursor: 'pointer', border: 'none', fontWeight: 'bold', fontSize: '14px', background: visibleGroupIds.includes(g.id) ? 'var(--theme-color)' : '#e2e8f0', color: visibleGroupIds.includes(g.id) ? 'white' : '#64748b' }}>
+                    <button key={g.id} onClick={() => setVisibleGroupIds(prev => prev.includes(g.id) ? prev.filter(id => id !== g.id) : [...prev, g.id])} style={{ height: '38px', padding: '0 14px', borderRadius: '20px', cursor: 'pointer', border: 'none', fontWeight: 'bold', fontSize: '14px', background: visibleGroupIds.includes(g.id) ? (g.theme_color || 'var(--theme-color)') : '#e2e8f0', color: visibleGroupIds.includes(g.id) ? 'white' : '#64748b' }}>
                         {visibleGroupIds.includes(g.id) ? '✓ ' : '+ '} {g.name}
                     </button>
                 ))}
             </div>
             
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                <select value={filterMode} onChange={(e) => setFilterMode(e.target.value)} style={{ height: '38px', padding: '0 10px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#f8fafc', fontWeight: 'bold', color: '#1e293b' }}>
+                <select value={filterMode} onChange={(e) => setFilterMode(e.target.value)} className="form-input" style={{ width: 'auto' }}>
                     <option value="ALL">🔍 Filter: Show All</option>
                     <option value="CHECKED">✅ Filter: Checked Only</option>
                     <option value="UNCHECKED">❌ Filter: Unchecked Only</option>
                 </select>
-                <select value={sortMode} onChange={(e) => setSortMode(e.target.value)} style={{ height: '38px', padding: '0 10px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#f8fafc', fontWeight: 'bold', color: '#1e293b' }}>
+                <select value={sortMode} onChange={(e) => setSortMode(e.target.value)} className="form-input" style={{ width: 'auto' }}>
                     <option value="A-Z">🔤 Sort: A-Z</option>
                     <option value="CHECKED_FIRST">✅ Sort: Checked First</option>
                     <option value="UNCHECKED_FIRST">❌ Sort: Unchecked First</option>
                 </select>
             </div>
 
-            <select value={selectedWeek || ''} onChange={(e) => setSelectedWeek(e.target.value)} style={{ height: '38px', padding: '0 10px', borderRadius: '6px', border: '1px solid #cbd5e1', background: 'white', fontWeight: 'bold' }}>
+            <select value={selectedWeek || ''} onChange={(e) => setSelectedWeek(e.target.value)} className="form-input" style={{ width: 'auto' }}>
               {weeks.map((w, idx) => <option key={w.id} value={w.id}>{idx === 0 ? "Current Week" : "Week of " + w.week_start_date}</option>)}
             </select>
             <input type="text" placeholder="Search checklists..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="form-input" style={{ maxWidth: '200px', margin: 0 }}/>
