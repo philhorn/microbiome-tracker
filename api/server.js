@@ -10,6 +10,7 @@ import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import rateLimit from 'express-rate-limit';
 import fs from 'fs';
+import { exec } from 'child_process';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -28,40 +29,15 @@ let db;
     await db.exec(`
         CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT, role TEXT DEFAULT 'user', family_id INTEGER, display_name TEXT, link_code TEXT, sort_order INTEGER DEFAULT 0, is_suspended INTEGER DEFAULT 0, failed_attempts INTEGER DEFAULT 0, locked_until TEXT);
         CREATE TABLE IF NOT EXISTS active_week (id INTEGER PRIMARY KEY AUTOINCREMENT, week_start_date TEXT);
-        CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, week_id INTEGER, food_item TEXT, FOREIGN KEY(user_id) REFERENCES users(id));
+        CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, week_id INTEGER, food_item TEXT, group_id INTEGER, FOREIGN KEY(user_id) REFERENCES users(id));
         CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
-        CREATE TABLE IF NOT EXISTS groups (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, join_code TEXT UNIQUE);
+        CREATE TABLE IF NOT EXISTS groups (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, join_code TEXT UNIQUE, isolate_tracker INTEGER DEFAULT 0);
         CREATE TABLE IF NOT EXISTS group_members (group_id INTEGER, user_id INTEGER, sort_order INTEGER DEFAULT 0, PRIMARY KEY(group_id, user_id));
-        CREATE TABLE IF NOT EXISTS foods (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, category TEXT);
+        CREATE TABLE IF NOT EXISTS foods (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, category TEXT, group_id INTEGER);
         
         INSERT INTO active_week (id, week_start_date) SELECT 1, date('now', 'localtime', '-7 days') WHERE NOT EXISTS (SELECT 1 FROM active_week WHERE id = 1);
         INSERT OR IGNORE INTO settings (key, value) VALUES ('max_attempts', '5'), ('lockout_mins', '15'), ('rollover_day', '0');
     `);
-    
-    try { await db.exec("ALTER TABLE users ADD COLUMN is_suspended INTEGER DEFAULT 0;"); } catch (e) {}
-    try { await db.exec("ALTER TABLE users ADD COLUMN failed_attempts INTEGER DEFAULT 0;"); } catch (e) {}
-    try { await db.exec("ALTER TABLE users ADD COLUMN locked_until TEXT;"); } catch (e) {}
-    try { await db.exec("ALTER TABLE foods ADD COLUMN group_id INTEGER;"); } catch (e) {}
-    try { await db.exec("ALTER TABLE logs ADD COLUMN group_id INTEGER;"); } catch (e) {}
-    try { await db.exec("ALTER TABLE groups ADD COLUMN isolate_tracker INTEGER DEFAULT 0;"); } catch (e) {}
-
-    const foodCount = await db.get("SELECT COUNT(*) as c FROM foods");
-    if (foodCount.c === 0) {
-        const defaultFoods = {
-            "Vegetables": ["Artichokes", "Arugula", "Asparagus", "Bamboo Shoots", "Beets", "Bell Peppers", "Bok Choy", "Broccoli", "Brussels Sprouts", "Cabbage", "Carrots", "Cauliflower", "Celery", "Collard Greens", "Cucumbers", "Dandelion Greens", "Eggplant", "Endive", "Fennel", "Garlic", "Green Beans", "Jerusalem Artichokes", "Jicama", "Kale", "Kohlrabi", "Leeks", "Mushrooms", "Mustard Greens", "Okra", "Olives", "Onions", "Parsnips", "Potatoes", "Pumpkin", "Radicchio", "Radishes", "Rutabaga", "Scallions", "Seaweed", "Shallots", "Spinach", "Sprouts", "Squash", "Sweet Potatoes", "Swiss Chard", "Tomatoes", "Turnips", "Watercress", "Zucchini"],
-            "Fruits": ["Apples", "Apricots", "Avocado", "Bananas", "Blackberries", "Blueberries", "Cherries", "Cranberries", "Dates", "Figs", "Grapefruit", "Grapes", "Guava", "Kiwi", "Lemon", "Mango", "Melon", "Oranges", "Papaya", "Peaches", "Pears", "Pineapple", "Plums", "Pomegranate", "Raspberries", "Rhubarb", "Strawberries", "Watermelon"],
-            "Nuts & Seeds": ["Almonds", "Cashews", "Chia Seeds", "Coconut", "Flaxseed", "Hazelnuts", "Hemp Seeds", "Macadamia Nuts", "Peanuts", "Pecans", "Pine Nuts", "Pistachios", "Pumpkin Seeds", "Sesame Seeds", "Sunflower Seeds", "Walnuts"],
-            "Legumes": ["Black Beans", "Cannellini Beans", "Chickpeas", "Edamame", "Green Peas", "Lentils", "Lima Beans", "Navy Beans", "Pinto Beans", "Soybeans"],
-            "Grains": ["Amaranth", "Barley", "Brown Rice", "Buckwheat", "Millet", "Oats", "Quinoa", "Rye", "Sorghum", "Teff", "Wild Rice"],
-            "Herbs & Spices": ["Basil", "Cilantro", "Cinnamon", "Dill", "Ginger", "Mint", "Oregano", "Parsley", "Rosemary", "Sage", "Thyme", "Turmeric"],
-            "Fermented & Other": ["Cocoa", "Kefir", "Kimchi", "Kombucha", "Miso", "Natto", "Olive Oil", "Red Wine", "Sauerkraut", "Tempeh", "Yogurt"]
-        };
-        const stmt = await db.prepare("INSERT INTO foods (name, category, group_id) VALUES (?, ?, NULL)");
-        for (const [cat, items] of Object.entries(defaultFoods)) {
-            for (const item of items) await stmt.run([item, cat]);
-        }
-        await stmt.finalize();
-    }
 
     const adminExists = await db.get("SELECT 1 FROM users WHERE role = 'admin'");
     if (!adminExists) {
@@ -90,21 +66,19 @@ const authenticate = (req, res, next) => {
     });
 };
 
-import { exec } from 'child_process';
-
+// --- GITHUB WEBHOOK LISTENER ---
 app.post('/api/webhook', (req, res) => {
-    // Extremely basic security - in production, you use crypto to verify a GitHub secret
     const authHeader = req.headers['x-github-event'];
-    if (!authHeader || authHeader !== 'push') return res.status(403).send('Denied');
+    if (!authHeader) return res.status(403).send('Denied');
 
     res.status(200).send('Build triggered');
-    
-    console.log('GitHub Push detected. Triggering deployment...' );
+    console.log('GitHub Push detected. Triggering deployment...');
     exec('/root/update.sh', (err, stdout, stderr) => {
         if (err) console.error(`Deployment failed: ${err}`);
-        else console.log(`Deployment successful: ${stdout}`);
+        else console.log(`Deployment successful:\n${stdout}`);
     });
 });
+// -------------------------------
 
 app.get('/api/setup-status', (req, res) => { res.json({ needsSetup: fs.existsSync(ADMIN_CRED_FILE) }); });
 
@@ -169,7 +143,6 @@ app.post('/api/lists/manage', authenticate, async (req, res) => {
     } catch(e) { res.status(400).json({ error: 'Database error' }); }
 });
 
-// CATEGORY MANAGEMENT ENDPOINT
 app.post('/api/lists/category', authenticate, async (req, res) => {
     if (req.userRole !== 'admin' && req.userRole !== 'dietitian' && req.userRole !== 'parent') return res.status(403).json({error: 'Denied'});
     const { action, oldCategory, newCategory, group_id } = req.body;
