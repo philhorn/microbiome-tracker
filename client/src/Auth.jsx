@@ -1,3 +1,4 @@
+import { APP_VERSION } from "./version";
 import React, { useState } from 'react';
 
 const APP_VERSION = "2026.10.04.21.4";

@@ -1,3 +1,4 @@
+import { APP_VERSION } from "./version";
 import React, { useState, useEffect } from 'react';
 import { apiFetch } from './api';
 import Auth from './Auth';
