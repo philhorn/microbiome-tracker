@@ -102,7 +102,6 @@ export default function App() {
 
   if (!token) return <Auth setAuthData={setAuthData} setupNotice={setupNotice} />;
 
-  // DYNAMIC BRANDING LOGIC
   let activeAppName = globalAppName;
   let activeThemeColor = globalThemeColor;
 
@@ -126,16 +125,15 @@ export default function App() {
         .form-btn { padding: 8px 16px; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; flex: 1 1 100%; background: var(--theme-color); }
         .nav-btn { padding: 8px 16px; border: none; background: none; cursor: pointer; font-weight: bold; color: #64748b; border-bottom: 2px solid transparent; }
         .nav-btn.active { color: var(--theme-color); border-bottom: 2px solid var(--theme-color); }
-        .food-col { position: sticky; left: 0; z-index: 30; background: white; }
-        .person-col { position: sticky; top: 0; z-index: 20; }
-        .cell-pad { padding: 10px 12px; position: relative; }
-        .drag-handle { position: absolute; right: 0; top: 0; width: 15px; height: 100%; cursor: col-resize; z-index: 25; }
-        .drag-handle:hover { background: rgba(0,0,0,0.05); }
+        .dropdown { position: relative; display: inline-block; }
+        .dropdown-content { display: none; position: absolute; right: 0; background-color: #white; min-width: 160px; box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2); z-index: 50; border-radius: 6px; border: 1px solid #e2e8f0; background: white; }
+        .dropdown-content button { color: #334155; padding: 10px 16px; text-decoration: none; display: block; width: 100%; text-align: left; background: none; border: none; cursor: pointer; font-weight: 500; }
+        .dropdown-content button:hover { background-color: #f1f5f9; color: var(--theme-color); }
+        .dropdown:hover .dropdown-content { display: block; }
         @media (max-width: 768px) {
           .app-container { padding: 10px; }
           .form-group { flex-direction: column; align-items: stretch; }
           .form-input { flex: 1 1 100%; width: 100%; box-sizing: border-box; }
-          .cell-pad { padding: 8px 6px; font-size: 14px; }
         }
       `}</style>
       
@@ -152,13 +150,23 @@ export default function App() {
                 <button onClick={() => { setImpersonatingUser(null); setProfileName(myName); setRefreshTrigger(p=>p+1); }} style={{ marginLeft: '10px', padding: '2px 8px', background: '#eab308', border: 'none', borderRadius: '4px', cursor: 'pointer', color: 'white' }}>Exit</button>
             </div>
           )}
-          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+          
+          {/* STREAMLINED NAVIGATION BAR */}
+          <div style={{ display: 'flex', gap: '15px', alignItems: 'center', borderBottom: '1px solid #e2e8f0', marginTop: '10px' }}>
             <button className={`nav-btn ${currentView === 'tracker' ? 'active' : ''}`} onClick={() => setCurrentView('tracker')}>Checklists</button>
             {(activeRole === 'parent' || activeRole === 'admin') && <button className={`nav-btn ${currentView === 'groups' ? 'active' : ''}`} onClick={() => setCurrentView('groups')}>Group Settings</button>}
-            <button className={`nav-btn ${currentView === 'profile' ? 'active' : ''}`} onClick={() => setCurrentView('profile')}>Profile</button>
-            <button className={`nav-btn ${currentView === 'about' ? 'active' : ''}`} onClick={() => setCurrentView('about')}>About</button>
-            {!impersonatingUser && (activeRole === 'admin' || activeRole === 'dietitian' || activeRole === 'parent') && <button className={`nav-btn ${currentView === 'lists' ? 'active' : ''}`} onClick={() => setCurrentView('lists')}>Checklist Manager</button>}
-            {!impersonatingUser && activeRole === 'admin' && <button className={`nav-btn ${currentView === 'admin' ? 'active' : ''}`} onClick={() => setCurrentView('admin')}>Admin</button>}
+            
+            <div className="dropdown">
+              <button className={`nav-btn ${['profile', 'lists', 'admin', 'about'].includes(currentView) ? 'active' : ''}`} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                More ▾
+              </button>
+              <div className="dropdown-content">
+                <button onClick={() => setCurrentView('profile')}>Profile</button>
+                {!impersonatingUser && (activeRole === 'admin' || activeRole === 'dietitian' || activeRole === 'parent') && <button onClick={() => setCurrentView('lists')}>Checklist Manager</button>}
+                {!impersonatingUser && activeRole === 'admin' && <button onClick={() => setCurrentView('admin')}>Admin Panel</button>}
+                <button onClick={() => setCurrentView('about')}>About</button>
+              </div>
+            </div>
           </div>
         </div>
         <button onClick={hardReset} style={{ padding: '8px 16px', background: '#e2e8f0', color: '#334155', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>Log Out</button>
@@ -226,7 +234,7 @@ export default function App() {
         </>
       )}
 
-      <div style={{ textAlign: 'center', fontSize: '12px', color: '#94a3b8', marginTop: '30px' }}>v{APP_VERSION}</div>
+      <div style={{ textAlign: 'center', fontSize: '12px', color: '#94a3b8', marginTop: '30px' %>v{APP_VERSION}</div>
     </div>
   );
 }

@@ -147,6 +147,7 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
                     border-collapse: separate;
                     border-spacing: 0;
                     width: 100%;
+                    min-width: max-content;
                     text-align: center;
                 }
                 .tracker-table th.person-col {
@@ -167,7 +168,7 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
                     z-index: 20;
                     background: white;
                 }
-                .tracker-table td.cat-col-cell {
+                .tracker-table tr.cat-row td {
                     position: sticky;
                     left: 0;
                     z-index: 20;
@@ -194,6 +195,7 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
                 
                 const sortedCats = Object.keys(categorized).sort();
                 const isGroupCollapsed = collapsedGroups[group.id];
+                const totalColumns = group.members.length + 1;
 
                 return (
                     <div key={group.id} style={{ border: '1px solid #cbd5e1', borderRadius: '8px', background: 'white', overflow: 'hidden', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}>
@@ -242,13 +244,10 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
 
                                             return (
                                             <React.Fragment key={catKey}>
-                                                <tr>
-                                                    <td onClick={() => setCollapsedCats({...collapsedCats, [catKey]: !collapsedCats[catKey]})} className="cat-col-cell cell-pad" style={{ borderBottom: '2px solid #94a3b8', borderRight: '2px solid #94a3b8', textAlign: 'left', fontWeight: 'bold', cursor: 'pointer', color: '#0f172a', fontSize: '14px' }}>
+                                                <tr className="cat-row">
+                                                    <td colSpan={totalColumns} onClick={() => setCollapsedCats({...collapsedCats, [catKey]: !collapsedCats[catKey]})} className="cell-pad" style={{ borderBottom: '2px solid #94a3b8', borderRight: '2px solid #94a3b8', textAlign: 'left', fontWeight: 'bold', cursor: 'pointer', color: '#0f172a', fontSize: '14px', background: '#cbd5e1' }}>
                                                         {collapsedCats[catKey] ? '▶' : '▼'} {category}
                                                     </td>
-                                                    {group.members.map(m => (
-                                                        <td key={m.id} className="cell-pad" style={{ background: '#e2e8f0', borderBottom: '2px solid #94a3b8', borderRight: '1px solid #c5cffd' }}></td>
-                                                    ))}
                                                 </tr>
                                                 {!collapsedCats[catKey] && sortedItems.map(item => {
                                                     const checkedCount = group.members.filter(m => (gridData[group.id]?.[m.id] || []).includes(item.name)).length;
