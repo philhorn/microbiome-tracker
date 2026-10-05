@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 
-const APP_VERSION = "2026.10.04.21.1";
+const APP_VERSION = "2026.10.04.21.4";
 
 export default function Auth({ setAuthData, setupNotice }) {
     const [isLoginView, setIsLoginView] = useState(true);
@@ -17,7 +17,7 @@ export default function Auth({ setAuthData, setupNotice }) {
             const res = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
             const data = await res.json();
             if (data.token) {
-                setAuthData(data.token, data.role, data.name, data.username, data.link_code);
+                setAuthData(data.token, data.role, data.name, data.username, data.link_code, data.id);
             } else if (!isLoginView && data.success) {
                 setIsLoginView(true); alert("Registered! Please log in.");
             } else { alert(data.error); }
@@ -26,12 +26,10 @@ export default function Auth({ setAuthData, setupNotice }) {
 
     return (
         <div style={{ maxWidth: '400px', margin: '50px auto', fontFamily: 'system-ui', padding: '24px', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
-            
             <div style={{ background: '#bfdbfe', padding: '12px', borderRadius: '6px', border: '1px solid #60a5fa', marginBottom: '20px', fontSize: '14px', color: '#1e3a8a', lineHeight: '1.4', textAlign: 'center' }}>
                 <strong>🚧 Under Active Development 🚧</strong><br/>
                 We are actively building and iterating on this system. Features and data you add may be cleared, modified, or reset as we push updates.
             </div>
-
             {setupNotice && (
                 <div style={{ background: '#fef3c7', padding: '12px', borderRadius: '6px', border: '1px solid #fcd34d', marginBottom: '20px', fontSize: '14px', color: '#92400e', lineHeight: '1.4' }}>
                 <strong>System Initialized</strong><br/>

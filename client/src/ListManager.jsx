@@ -1,60 +1,40 @@
 import React, { useState } from 'react';
 
 export default function ListManager({ listItems, groups, activeRole, token, impersonatingId, apiFetch, refreshTrigger }) {
-    
-    // Default to the first group they belong to, or GLOBAL if admin
     const defaultGroup = activeRole === 'admin' ? "GLOBAL" : (groups.length > 0 ? groups[0].id.toString() : "");
     const [selectedGroupId, setSelectedGroupId] = useState(defaultGroup);
     
     const [newFoodName, setNewFoodName] = useState('');
     const [newFoodCat, setNewFoodCat] = useState('');
     const [customCat, setCustomCat] = useState('');
+    
     const [editingFood, setEditingFood] = useState(null);
+    const [editingCategory, setEditingCategory] = useState(null);
 
-    // Filter items based on the active selection
     const displayItems = listItems.filter(i => selectedGroupId === "GLOBAL" ? i.group_id === null : i.group_id === parseInt(selectedGroupId));
+    const categories = [...new Set(listItems.map(i => i.category))].sort();
     
-    // Extract unique categories for the dropdown from ALL visible items to make selection easier
-    const categories = [...new Set(listItems.map(i => i.category))];
-    
-    // Group display items for rendering
     const categorized = {};
     displayItems.forEach(i => {
         if (!categorized[i.category]) categorized[i.category] = [];
         categorized[i.category].push(i);
     });
+    const sortedCats = Object.keys(categorized).sort();
 
     const handleAdd = async (e) => {
         e.preventDefault();
         const cat = newFoodCat === 'NEW' ? customCat : newFoodCat;
         if (!cat || !newFoodName) return alert('Name and Category required');
         
-        const payload = { 
-            action: 'add', 
-            name: newFoodName, 
-            category: cat,
-            group_id: selectedGroupId === "GLOBAL" ? null : parseInt(selectedGroupId)
-        };
-        
+        const payload = { action: 'add', name: newFoodName, category: cat, group_id: selectedGroupId === "GLOBAL" ? null : parseInt(selectedGroupId) };
         const res = await apiFetch('/api/lists/manage', token, impersonatingId, { method: 'POST', body: JSON.stringify(payload) });
         const data = await res.json();
-        if (data.success) {
-            setNewFoodName(''); setCustomCat(''); setNewFoodCat('');
-            refreshTrigger(); alert('Item added!');
-        } else alert(data.error);
+        if (data.success) { setNewFoodName(''); setCustomCat(''); setNewFoodCat(''); refreshTrigger(); alert('Item added!'); } else alert(data.error);
     };
 
     const handleEditSave = async () => {
         if (!editingFood.name || !editingFood.category) return;
-        
-        const payload = { 
-            action: 'edit', 
-            oldName: editingFood.oldName, 
-            name: editingFood.name, 
-            category: editingFood.category,
-            group_id: selectedGroupId === "GLOBAL" ? null : parseInt(selectedGroupId)
-        };
-        
+        const payload = { action: 'edit', oldName: editingFood.oldName, name: editingFood.name, category: editingFood.category, group_id: selectedGroupId === "GLOBAL" ? null : parseInt(selectedGroupId) };
         const res = await apiFetch('/api/lists/manage', token, impersonatingId, { method: 'POST', body: JSON.stringify(payload) });
         const data = await res.json();
         if (data.success) { setEditingFood(null); refreshTrigger(); } else alert(data.error);
@@ -62,14 +42,24 @@ export default function ListManager({ listItems, groups, activeRole, token, impe
 
     const handleDelete = async (name) => {
         if (!window.confirm(`Delete "${name}"? This will permanently wipe this item from the tracker.`)) return;
-        
-        const payload = { 
-            action: 'delete', 
-            name,
-            group_id: selectedGroupId === "GLOBAL" ? null : parseInt(selectedGroupId)
-        };
-        
+        const payload = { action: 'delete', name, group_id: selectedGroupId === "GLOBAL" ? null : parseInt(selectedGroupId) };
         const res = await apiFetch('/api/lists/manage', token, impersonatingId, { method: 'POST', body: JSON.stringify(payload) });
+        const data = await res.json();
+        if (data.success) refreshTrigger(); else alert(data.error);
+    };
+
+    const handleRenameCategory = async () => {
+        if (!editingCategory.newName.trim()) return;
+        const payload = { action: 'rename', oldCategory: editingCategory.oldName, newCategory: editingCategory.newName, group_id: selectedGroupId === "GLOBAL" ? null : parseInt(selectedGroupId) };
+        const res = await apiFetch('/api/lists/category', token, impersonatingId, { method: 'POST', body: JSON.stringify(payload) });
+        const data = await res.json();
+        if (data.success) { setEditingCategory(null); refreshTrigger(); } else alert(data.error);
+    };
+
+    const handleDeleteCategory = async (catName) => {
+        if (!window.confirm(`WARNING: Are you sure you want to delete the entire "${catName}" category AND every item inside it?`)) return;
+        const payload = { action: 'delete', oldCategory: catName, group_id: selectedGroupId === "GLOBAL" ? null : parseInt(selectedGroupId) };
+        const res = await apiFetch('/api/lists/category', token, impersonatingId, { method: 'POST', body: JSON.stringify(payload) });
         const data = await res.json();
         if (data.success) refreshTrigger(); else alert(data.error);
     };
@@ -110,16 +100,33 @@ export default function ListManager({ listItems, groups, activeRole, token, impe
                 </form>
             </div>
 
-            {Object.keys(categorized).length === 0 && (
+            {sortedCats.length === 0 && (
                 <div style={{ padding: '20px', textAlign: 'center', color: '#64748b', border: '2px dashed #cbd5e1', borderRadius: '8px' }}>
                     No custom items found for this list. Add one above!
                 </div>
             )}
 
-            {Object.keys(categorized).map(cat => (
+            {sortedCats.map(cat => (
                 <div key={cat} style={{ background: 'white', padding: '15px', borderRadius: '8px', border: '2px solid #cbd5e1' }}>
-                    <h3 style={{ margin: '0 0 15px 0', borderBottom: '2px solid #e2e8f0', paddingBottom: '8px' }}>{cat}</h3>
-                    {categorized[cat].map(item => (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #e2e8f0', paddingBottom: '8px', marginBottom: '15px' }}>
+                        {editingCategory && editingCategory.oldName === cat ? (
+                            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                <input type="text" value={editingCategory.newName} onChange={e => setEditingCategory({...editingCategory, newName: e.target.value})} className="form-input" style={{ padding: '4px' }} />
+                                <button onClick={handleRenameCategory} style={{ padding: '4px 8px', background: '#10b981', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Save</button>
+                                <button onClick={() => setEditingCategory(null)} style={{ padding: '4px 8px', background: '#64748b', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Cancel</button>
+                            </div>
+                        ) : (
+                            <h3 style={{ margin: 0 }}>{cat}</h3>
+                        )}
+                        {!editingCategory && (
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                                <button onClick={() => setEditingCategory({ oldName: cat, newName: cat })} style={{ fontSize: '12px', padding: '4px 8px', background: '#e2e8f0', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Rename Category</button>
+                                <button onClick={() => handleDeleteCategory(cat)} style={{ fontSize: '12px', padding: '4px 8px', background: '#fee2e2', color: '#991b1b', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Delete Category</button>
+                            </div>
+                        )}
+                    </div>
+                    
+                    {categorized[cat].sort((a,b) => a.name.localeCompare(b.name)).map(item => (
                         <div key={item.name} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '4px', marginBottom: '5px', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
                             {editingFood && editingFood.oldName === item.name ? (
                                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexGrow: 1 }}>

@@ -42,8 +42,6 @@ let db;
     try { await db.exec("ALTER TABLE users ADD COLUMN failed_attempts INTEGER DEFAULT 0;"); } catch (e) {}
     try { await db.exec("ALTER TABLE users ADD COLUMN locked_until TEXT;"); } catch (e) {}
     try { await db.exec("ALTER TABLE foods ADD COLUMN group_id INTEGER;"); } catch (e) {}
-    
-    // Core SaaS Migrations: Add group IDs to logs and isolation states to groups
     try { await db.exec("ALTER TABLE logs ADD COLUMN group_id INTEGER;"); } catch (e) {}
     try { await db.exec("ALTER TABLE groups ADD COLUMN isolate_tracker INTEGER DEFAULT 0;"); } catch (e) {}
 
@@ -81,6 +79,7 @@ const authenticate = (req, res, next) => {
         if (err) return res.status(403).json({ error: 'Forbidden' });
         const user = await db.get('SELECT is_suspended FROM users WHERE id = ?', [decoded.id]);
         if (!user || user.is_suspended) return res.status(403).json({ error: 'Account suspended.' });
+        
         req.userId = decoded.id; req.userRole = decoded.role; 
         const impId = req.headers['x-impersonate'];
         if (impId && decoded.role === 'admin') {
@@ -154,6 +153,23 @@ app.post('/api/lists/manage', authenticate, async (req, res) => {
     } catch(e) { res.status(400).json({ error: 'Database error' }); }
 });
 
+// CATEGORY MANAGEMENT ENDPOINT
+app.post('/api/lists/category', authenticate, async (req, res) => {
+    if (req.userRole !== 'admin' && req.userRole !== 'dietitian' && req.userRole !== 'parent') return res.status(403).json({error: 'Denied'});
+    const { action, oldCategory, newCategory, group_id } = req.body;
+    if (group_id === null && req.userRole !== 'admin') return res.status(403).json({error: 'Only admins can modify global templates.'});
+
+    try {
+        if (action === 'rename') {
+            await db.run('UPDATE foods SET category = ? WHERE category = ? AND (group_id = ? OR (group_id IS NULL AND ? IS NULL))', [newCategory.trim(), oldCategory, group_id, group_id]);
+        } else if (action === 'delete') {
+            await db.run('DELETE FROM foods WHERE category = ? AND (group_id = ? OR (group_id IS NULL AND ? IS NULL))', [oldCategory, group_id, group_id]);
+            await db.run('DELETE FROM logs WHERE food_item IN (SELECT name FROM foods WHERE category = ? AND (group_id = ? OR (group_id IS NULL AND ? IS NULL)))', [oldCategory, group_id, group_id]);
+        }
+        res.json({ success: true });
+    } catch(e) { res.status(400).json({ error: 'Database error' }); }
+});
+
 app.put('/api/user/profile', authenticate, async (req, res) => {
     if (req.body.displayName) await db.run('UPDATE users SET display_name = ? WHERE id = ?', [req.body.displayName, req.userId]);
     if (req.body.newPassword) {
@@ -179,7 +195,6 @@ app.delete('/api/user/delete', authenticate, async (req, res) => {
 
 app.get('/api/weeks', authenticate, async (req, res) => { res.json(await db.all('SELECT id, week_start_date FROM active_week ORDER BY id DESC')); });
 
-// The Core SaaS Payload: Re-architected gridData to support group isolation
 app.get('/api/groups/grid', authenticate, async (req, res) => {
     const weekId = req.query.weekId || (await db.get('SELECT MAX(id) as id FROM active_week')).id;
     let myGroups = await db.all('SELECT group_id FROM group_members WHERE user_id = ?', [req.userId]);
@@ -210,12 +225,9 @@ app.get('/api/groups/grid', authenticate, async (req, res) => {
     logs.forEach(l => {
         formattedGroups.forEach(g => {
             if (grid[g.id] && grid[g.id][l.user_id] !== undefined) {
-                // If log is global and group is unified -> include
                 if (l.group_id === null && g.isolate_tracker === 0) {
                     grid[g.id][l.user_id].push(l.food_item);
-                } 
-                // If log belongs specifically to this group -> include
-                else if (l.group_id === g.id) {
+                } else if (l.group_id === g.id) {
                     grid[g.id][l.user_id].push(l.food_item);
                 }
             }
@@ -306,7 +318,6 @@ app.post('/api/toggle/:targetId', authenticate, async (req, res) => {
     const group = await db.get('SELECT isolate_tracker FROM groups WHERE id = ?', [groupId]);
     const food = await db.get('SELECT group_id FROM foods WHERE name = ?', [item]);
     
-    // Core Isolation Check
     let targetGroupId = groupId;
     if (food && food.group_id === null && group && group.isolate_tracker === 0) {
         targetGroupId = null; // Sync Globally!

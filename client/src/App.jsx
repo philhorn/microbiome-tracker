@@ -6,7 +6,7 @@ import GroupManager from './GroupManager';
 import AdminPanel from './AdminPanel';
 import ListManager from './ListManager';
 
-const APP_VERSION = "2026.10.04.21.3";
+const APP_VERSION = "2026.10.04.21.4";
 
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem('token'));
@@ -14,9 +14,11 @@ export default function App() {
   const [myName, setMyName] = useState(localStorage.getItem('name') || '');
   const [myUsername, setMyUsername] = useState(localStorage.getItem('username') || '');
   const [myLinkCode, setMyLinkCode] = useState(localStorage.getItem('linkCode') || '');
+  const [myUserId, setMyUserId] = useState(localStorage.getItem('userId') || '');
   
   const [currentView, setCurrentView] = useState('tracker'); 
   const [searchTerm, setSearchTerm] = useState('');
+  const [filterMode, setFilterMode] = useState('ALL');
   
   const [groups, setGroups] = useState([]);
   const [visibleGroupIds, setVisibleGroupIds] = useState([]);
@@ -33,6 +35,7 @@ export default function App() {
   const activeRole = impersonatingUser ? impersonatingUser.role : role;
   const activeName = impersonatingUser ? impersonatingUser.name : myName;
   const activeUsername = impersonatingUser ? impersonatingUser.username : myUsername;
+  const effectiveUserId = impersonatingUser ? impersonatingUser.id : parseInt(myUserId);
   
   const [profileName, setProfileName] = useState(activeName);
   const [profilePass, setProfilePass] = useState('');
@@ -69,12 +72,12 @@ export default function App() {
     }
   }, [token, activeRole, selectedWeek, currentView, refreshTrigger, impersonatingUser]);
 
-  const setAuthData = (newToken, newRole, newName, newUsername, newLinkCode) => {
+  const setAuthData = (newToken, newRole, newName, newUsername, newLinkCode, newUserId) => {
       localStorage.setItem('token', newToken); localStorage.setItem('role', newRole); 
       localStorage.setItem('name', newName); localStorage.setItem('username', newUsername);
-      localStorage.setItem('linkCode', newLinkCode);
+      localStorage.setItem('linkCode', newLinkCode); localStorage.setItem('userId', newUserId);
       setToken(newToken); setRole(newRole); setMyName(newName); setMyUsername(newUsername); 
-      setProfileName(newName); setMyLinkCode(newLinkCode);
+      setProfileName(newName); setMyLinkCode(newLinkCode); setMyUserId(newUserId);
   };
 
   const updateProfile = async (e) => {
@@ -152,7 +155,6 @@ export default function App() {
       {currentView === 'about' && (
         <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '8px', border: '1px solid #e2e8f0', lineHeight: '1.6' }}>
           <h3>Multi-Tenant Checklist Engine</h3>
-          <p>Scientific research indicates that eating 30 or more different plant-based foods each week significantly diversifies the gut microbiome.</p>
           <p>This tracking engine is designed to accommodate multiple groups seamlessly. Whether tracking weekly food intake or managing workspace opening procedures, each checklist belongs to its designated group.</p>
         </div>
       )}
@@ -200,12 +202,19 @@ export default function App() {
                     </button>
                 ))}
             </div>
+            
+            <select value={filterMode} onChange={(e) => setFilterMode(e.target.value)} style={{ padding: '8px', borderRadius: '4px', border: '1px solid #cbd5e1', background: '#f8fafc', fontWeight: 'bold', color: '#1e293b' }}>
+                <option value="ALL">🔍 Show All</option>
+                <option value="CHECKED">✅ Checked by Me</option>
+                <option value="UNCHECKED">❌ Unchecked by Me</option>
+            </select>
+
             <select value={selectedWeek || ''} onChange={(e) => setSelectedWeek(e.target.value)} style={{ padding: '8px', borderRadius: '4px', border: '1px solid #cbd5e1', background: 'white', fontWeight: 'bold' }}>
               {weeks.map((w, idx) => <option key={w.id} value={w.id}>{idx === 0 ? "Current Week" : "Week of " + w.week_start_date}</option>)}
             </select>
             <input type="text" placeholder="Search checklists..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="form-input" style={{ maxWidth: '200px' }}/>
           </div>
-          <TrackerGrid groups={groups} visibleGroupIds={visibleGroupIds} gridData={gridData} setGridData={setGridData} listItems={listItems} searchTerm={searchTerm} activeRole={activeRole} impersonatingId={impersonatingUser?.id} selectedWeek={selectedWeek} apiFetch={apiFetch} token={token} />
+          <TrackerGrid groups={groups} visibleGroupIds={visibleGroupIds} gridData={gridData} setGridData={setGridData} listItems={listItems} searchTerm={searchTerm} filterMode={filterMode} effectiveUserId={effectiveUserId} activeRole={activeRole} impersonatingId={impersonatingUser?.id} selectedWeek={selectedWeek} apiFetch={apiFetch} token={token} />
         </>
       )}
 

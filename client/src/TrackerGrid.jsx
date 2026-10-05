@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 
 const columnColors = ['#f0f9ff', '#f0fdf4', '#fefce8', '#fff1f2', '#f3e8ff', '#ecfeff', '#fdf4ff'];
 
-export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGridData, listItems, searchTerm, activeRole, impersonatingId, selectedWeek, apiFetch, token }) {
+export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGridData, listItems, searchTerm, filterMode, effectiveUserId, activeRole, impersonatingId, selectedWeek, apiFetch, token }) {
     const [collapsedCats, setCollapsedCats] = useState({});
     const [undoMemory, setUndoMemory] = useState({});
     const [colWidths, setColWidths] = useState(() => {
@@ -26,7 +26,6 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
     const handleToggle = async (memberId, itemName, groupId, isGlobalItem, isUnifiedGroup) => {
         const isChecked = (gridData[groupId]?.[memberId] || []).includes(itemName);
         
-        // Optimistic UI Update reflecting true isolation vs unity logic
         setGridData(prev => {
             const next = JSON.parse(JSON.stringify(prev));
             const appliesToAll = isGlobalItem && isUnifiedGroup;
@@ -133,14 +132,25 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
             {visibleGroups.map(group => {
-                const groupItems = listItems.filter(i => (i.group_id === null || i.group_id === group.id) && i.name.toLowerCase().includes(searchTerm.toLowerCase()));
-                if (groupItems.length === 0 && searchTerm) return null;
+                let groupItems = listItems.filter(i => (i.group_id === null || i.group_id === group.id) && i.name.toLowerCase().includes(searchTerm.toLowerCase()));
+                
+                // Advanced Filter Injection
+                if (filterMode === 'CHECKED') {
+                    groupItems = groupItems.filter(i => (gridData[group.id]?.[effectiveUserId] || []).includes(i.name));
+                } else if (filterMode === 'UNCHECKED') {
+                    groupItems = groupItems.filter(i => !(gridData[group.id]?.[effectiveUserId] || []).includes(i.name));
+                }
+
+                if (groupItems.length === 0 && (searchTerm || filterMode !== 'ALL')) return null;
 
                 const categorized = {};
                 groupItems.forEach(i => {
                     if (!categorized[i.category]) categorized[i.category] = [];
                     categorized[i.category].push(i);
                 });
+                
+                // Enforce Alphabetical Sorting for cleaner UX
+                const sortedCats = Object.keys(categorized).sort();
 
                 return (
                     <div key={group.id} style={{ maxHeight: '70vh', overflow: 'auto', border: '1px solid #e2e8f0', borderRadius: '8px', background: 'white', WebkitOverflowScrolling: 'touch' }}>
@@ -151,11 +161,11 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
                         <table style={{ borderCollapse: 'separate', borderSpacing: 0, width: '100%', textAlign: 'center' }}>
                             <thead>
                                 <tr>
-                                    <th className="food-col cell-pad top-left-corner" style={{ width: colWidths['food'] || 160, minWidth: 120, maxWidth: colWidths['food'] || 160, borderBottom: '2px solid #cbd5e1', borderRight: '2px solid #cbd5e1', textAlign: 'left', top: '44px' }}>
+                                    <th className="food-col cell-pad top-left-corner" style={{ width: colWidths['food'] || 160, minWidth: 120, maxWidth: colWidths['food'] || 160, borderBottom: '2px solid #94a3b8', borderRight: '2px solid #94a3b8', textAlign: 'left', top: '44px', background: '#f1f5f9' }}>
                                         Task / Item <div className="drag-handle" onMouseDown={(e) => handleDrag(e, 'food', 160)} />
                                     </th>
                                     {group.members.map((m, idx) => (
-                                        <th key={m.id} className="person-col cell-pad" style={{ width: colWidths[m.id] || 90, minWidth: 80, maxWidth: colWidths[m.id] || 90, background: columnColors[idx % columnColors.length], borderBottom: '2px solid #cbd5e1', borderRight: '1px solid #e2e8f0', top: '44px' }}>
+                                        <th key={m.id} className="person-col cell-pad" style={{ width: colWidths[m.id] || 90, minWidth: 80, maxWidth: colWidths[m.id] || 90, background: columnColors[idx % columnColors.length], borderBottom: '2px solid #94a3b8', borderRight: '1px solid #e2e8f0', top: '44px' }}>
                                             <span style={{ fontWeight: 'bold' }}>{m.name}</span><br/>
                                             <span style={{ fontSize: '0.85em', fontWeight: 'normal', color: '#64748b' }}>Score: {gridData[group.id]?.[m.id]?.length || 0}</span>
                                             <div className="drag-handle" onMouseDown={(e) => handleDrag(e, m.id, 90)} />
@@ -164,19 +174,23 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
                                 </tr>
                             </thead>
                             <tbody>
-                                {Object.keys(categorized).map(category => {
+                                {sortedCats.map(category => {
                                     const catKey = `${group.id}-${category}`;
+                                    
+                                    // Enforce alphabetical sort on items inside the category
+                                    const sortedItems = categorized[category].sort((a, b) => a.name.localeCompare(b.name));
+
                                     return (
                                     <React.Fragment key={catKey}>
                                         <tr>
-                                            <td onClick={() => setCollapsedCats({...collapsedCats, [catKey]: !collapsedCats[catKey]})} className="food-col cell-pad category-row" style={{ background: '#e2e8f0', borderBottom: '2px solid #cbd5e1', borderRight: '2px solid #cbd5e1', textAlign: 'left', fontWeight: 'bold', cursor: 'pointer' }}>
+                                            <td onClick={() => setCollapsedCats({...collapsedCats, [catKey]: !collapsedCats[catKey]})} className="food-col cell-pad category-row" style={{ background: '#cbd5e1', borderBottom: '2px solid #94a3b8', borderRight: '2px solid #94a3b8', textAlign: 'left', fontWeight: 'bold', cursor: 'pointer', color: '#0f172a', fontSize: '15px' }}>
                                                 {collapsedCats[catKey] ? '▶' : '▼'} {category}
                                             </td>
                                             {group.members.map(m => (
-                                                <td key={m.id} className="cell-pad category-row" style={{ background: '#f1f5f9', borderBottom: '2px solid #cbd5e1', borderRight: '1px solid #cbd5e1' }}></td>
+                                                <td key={m.id} className="cell-pad category-row" style={{ background: '#e2e8f0', borderBottom: '2px solid #94a3b8', borderRight: '1px solid #cbd5e1' }}></td>
                                             ))}
                                         </tr>
-                                        {!collapsedCats[catKey] && categorized[category].map(item => {
+                                        {!collapsedCats[catKey] && sortedItems.map(item => {
                                             const checkedCount = group.members.filter(m => (gridData[group.id]?.[m.id] || []).includes(item.name)).length;
                                             let allBtnText = "All", action = 'all', btnColor = '#cbd5e1', hoverTitle = "Check everyone in group";
                                             const memKey = `${group.id}-${item.name}`;
