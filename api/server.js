@@ -3,14 +3,17 @@ import cors from 'cors';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import cron from 'node-cron';
-import sqlite3 from 'sqlite3';
-import { open } from 'sqlite';
+import pkg from 'pg';
+const { Pool } = pkg;
 import path from 'path';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import rateLimit from 'express-rate-limit';
 import fs from 'fs';
 import { exec } from 'child_process';
+import * as dotenv from 'dotenv';
+
+dotenv.config();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -21,34 +24,72 @@ const ADMIN_CRED_FILE = path.join(__dirname, 'admin_credentials.txt');
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '..', 'client', 'dist')));
-
-// FIX: Trust Cloudflare Tunnel Proxy for Rate Limiting
 app.set('trust proxy', 1);
+
 const registerLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 10 });
 
-let db;
-(async () => {
-    db = await open({ filename: path.join(__dirname, 'database.sqlite'), driver: sqlite3.Database });
-    await db.exec(`
-        CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT, role TEXT DEFAULT 'user', family_id INTEGER, display_name TEXT, link_code TEXT, sort_order INTEGER DEFAULT 0, is_suspended INTEGER DEFAULT 0, failed_attempts INTEGER DEFAULT 0, locked_until TEXT);
-        CREATE TABLE IF NOT EXISTS active_week (id INTEGER PRIMARY KEY AUTOINCREMENT, week_start_date TEXT);
-        CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, week_id INTEGER, food_item TEXT, group_id INTEGER, FOREIGN KEY(user_id) REFERENCES users(id));
-        CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
-        CREATE TABLE IF NOT EXISTS groups (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, join_code TEXT UNIQUE, isolate_tracker INTEGER DEFAULT 0, app_name TEXT, theme_color TEXT);
-        CREATE TABLE IF NOT EXISTS group_members (group_id INTEGER, user_id INTEGER, sort_order INTEGER DEFAULT 0, PRIMARY KEY(group_id, user_id));
-        CREATE TABLE IF NOT EXISTS foods (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, category TEXT, group_id INTEGER);
-        
-        INSERT INTO active_week (id, week_start_date) SELECT 1, date('now', 'localtime', '-7 days') WHERE NOT EXISTS (SELECT 1 FROM active_week WHERE id = 1);
-        INSERT OR IGNORE INTO settings (key, value) VALUES ('max_attempts', '5'), ('lockout_mins', '15'), ('rollover_day', '0'), ('app_name', 'Microbiome Tracker'), ('theme_color', '#ef4444');
-    `);
+// --- POSTGRESQL ENGINE ---
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
-    const adminExists = await db.get("SELECT 1 FROM users WHERE role = 'admin'");
-    if (!adminExists) {
-        const tempPassword = crypto.randomBytes(6).toString('hex');
-        const adminHash = await bcrypt.hash(tempPassword, 10);
-        await db.exec(`INSERT INTO users (username, password, role, display_name) VALUES ('admin', '${adminHash}', 'admin', 'System Admin')`);
-        fs.writeFileSync(ADMIN_CRED_FILE, `INITIAL SYSTEM SETUP\nUsername: admin\nTemporary Password: ${tempPassword}\n\nLog in and change immediately.\n`, { mode: 0o600 });
-    }
+const query = async (text, params = []) => {
+    let i = 1;
+    const pgText = text.replace(/\?/g, () => `$${i++}`);
+    return await pool.query(pgText, params);
+};
+
+const db = {
+    get: async (text, params) => (await query(text, params)).rows[0],
+    all: async (text, params) => (await query(text, params)).rows,
+    run: async (text, params) => await query(text, params),
+    runReturnId: async (text, params) => {
+        const res = await query(`${text} RETURNING id`, params);
+        return { lastID: res.rows[0].id };
+    },
+    exec: async (text) => await pool.query(text)
+};
+
+(async () => {
+    try {
+        await db.exec(`
+            CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, username TEXT UNIQUE, password TEXT, role TEXT DEFAULT 'user', family_id INTEGER, display_name TEXT, link_code TEXT, sort_order INTEGER DEFAULT 0, is_suspended INTEGER DEFAULT 0, failed_attempts INTEGER DEFAULT 0, locked_until TEXT);
+            CREATE TABLE IF NOT EXISTS active_week (id SERIAL PRIMARY KEY, week_start_date DATE);
+            CREATE TABLE IF NOT EXISTS logs (id SERIAL PRIMARY KEY, user_id INTEGER REFERENCES users(id), week_id INTEGER, food_item TEXT, group_id INTEGER);
+            CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
+            CREATE TABLE IF NOT EXISTS groups (id SERIAL PRIMARY KEY, name TEXT, join_code TEXT UNIQUE, isolate_tracker INTEGER DEFAULT 0, app_name TEXT, theme_color TEXT);
+            CREATE TABLE IF NOT EXISTS group_members (group_id INTEGER, user_id INTEGER, sort_order INTEGER DEFAULT 0, PRIMARY KEY(group_id, user_id));
+            CREATE TABLE IF NOT EXISTS foods (id SERIAL PRIMARY KEY, name TEXT, category TEXT, group_id INTEGER);
+            
+            INSERT INTO active_week (week_start_date) SELECT CURRENT_DATE - INTERVAL '7 days' WHERE NOT EXISTS (SELECT 1 FROM active_week WHERE id = 1);
+            
+            INSERT INTO settings (key, value) VALUES 
+                ('max_attempts', '5'), ('lockout_mins', '15'), ('rollover_day', '0'), ('app_name', 'Microbiome Tracker'), ('theme_color', '#ef4444')
+            ON CONFLICT (key) DO NOTHING;
+        `);
+
+        const foodCount = await db.get("SELECT COUNT(*) as c FROM foods");
+        if (parseInt(foodCount.c) === 0) {
+            const defaultFoods = {
+                "Vegetables": ["Artichokes", "Arugula", "Asparagus", "Broccoli", "Carrots", "Cauliflower", "Kale", "Spinach"],
+                "Fruits": ["Apples", "Avocado", "Bananas", "Blueberries", "Strawberries"],
+                "Nuts & Seeds": ["Almonds", "Chia Seeds", "Walnuts"],
+                "Legumes": ["Black Beans", "Chickpeas", "Lentils"],
+                "Grains": ["Brown Rice", "Oats", "Quinoa"],
+                "Fermented & Other": ["Kefir", "Kimchi", "Kombucha", "Yogurt"]
+            };
+            for (const [cat, items] of Object.entries(defaultFoods)) {
+                for (const item of items) await db.run("INSERT INTO foods (name, category, group_id) VALUES (?, ?, NULL)", [item, cat]);
+            }
+        }
+
+        const adminExists = await db.get("SELECT 1 FROM users WHERE role = 'admin'");
+        if (!adminExists) {
+            const tempPassword = crypto.randomBytes(6).toString('hex');
+            const adminHash = await bcrypt.hash(tempPassword, 10);
+            await db.run(`INSERT INTO users (username, password, role, display_name) VALUES ('admin', ?, 'admin', 'System Admin')`, [adminHash]);
+            fs.writeFileSync(ADMIN_CRED_FILE, `INITIAL SYSTEM SETUP\nUsername: admin\nTemporary Password: ${tempPassword}\n\nLog in and change immediately.\n`, { mode: 0o600 });
+        }
+        console.log("PostgreSQL Database Connected & Initialized");
+    } catch (err) { console.error("Database Init Error:", err); }
 })();
 
 const authenticate = (req, res, next) => {
@@ -73,8 +114,7 @@ app.post('/api/webhook', (req, res) => {
     const authHeader = req.headers['x-github-event'];
     if (!authHeader) return res.status(403).send('Denied');
     res.status(200).send('Build triggered');
-    console.log('GitHub Push detected. Triggering deployment...');
-    exec('bash ../deploy.sh', (err, stdout, stderr) => {
+    exec('bash ../deploy-app.sh', (err, stdout, stderr) => {
         if (err) console.error(`Deployment failed: ${err}`);
         else console.log(`Deployment successful:\n${stdout}`);
     });
@@ -93,15 +133,14 @@ app.post('/api/register', registerLimiter, async (req, res) => {
     if (!rawUsername) return res.status(400).json({ error: 'Username required' });
     const lowerUsername = rawUsername.toLowerCase();
     const hash = await bcrypt.hash(req.body.password, 10);
-    const existing = await db.get('SELECT id FROM users WHERE LOWER(username) = ?', [lowerUsername]);
-    if (existing) return res.status(400).json({ error: 'Username exists' });
+    if (await db.get('SELECT id FROM users WHERE LOWER(username) = ?', [lowerUsername])) return res.status(400).json({ error: 'Username exists' });
 
     try { 
         const linkCode = crypto.randomInt(100000, 1000000).toString();
-        const result = await db.run('INSERT INTO users (username, password, role, display_name, link_code) VALUES (?, ?, ?, ?, ?)', [lowerUsername, hash, req.body.isParent ? 'parent' : 'user', req.body.displayName || rawUsername, linkCode]); 
+        const userRes = await db.runReturnId('INSERT INTO users (username, password, role, display_name, link_code) VALUES (?, ?, ?, ?, ?)', [lowerUsername, hash, req.body.isParent ? 'parent' : 'user', req.body.displayName || rawUsername, linkCode]); 
         const joinCode = crypto.randomInt(100000, 1000000).toString();
-        const groupRes = await db.run("INSERT INTO groups (name, join_code) VALUES ('My Group', ?)", [joinCode]);
-        await db.run("INSERT INTO group_members (group_id, user_id, sort_order) VALUES (?, ?, 0)", [groupRes.lastID, result.lastID]);
+        const groupRes = await db.runReturnId("INSERT INTO groups (name, join_code) VALUES ('My Group', ?)", [joinCode]);
+        await db.run("INSERT INTO group_members (group_id, user_id, sort_order) VALUES (?, ?, 0)", [groupRes.lastID, userRes.lastID]);
         res.json({ success: true }); 
     } catch (e) { res.status(400).json({ error: 'Database error' }); }
 });
@@ -196,14 +235,14 @@ app.get('/api/groups/grid', authenticate, async (req, res) => {
     
     if (!myGroups.length) {
         const joinCode = crypto.randomInt(100000, 1000000).toString();
-        const groupRes = await db.run("INSERT INTO groups (name, join_code) VALUES ('My Workspace', ?)", [joinCode]);
+        const groupRes = await db.runReturnId("INSERT INTO groups (name, join_code) VALUES ('My Workspace', ?)", [joinCode]);
         await db.run("INSERT INTO group_members (group_id, user_id, sort_order) VALUES (?, ?, 0)", [groupRes.lastID, req.userId]);
         myGroups = [{ group_id: groupRes.lastID }];
     }
     
     const groupIds = myGroups.map(g => g.group_id);
-    const groups = await db.all(`SELECT id, name, join_code, isolate_tracker, app_name, theme_color FROM groups WHERE id IN (${groupIds.join(',')})`);
-    const members = await db.all(`SELECT gm.group_id, u.id, u.display_name as name, gm.sort_order FROM group_members gm JOIN users u ON gm.user_id = u.id WHERE gm.group_id IN (${groupIds.join(',')}) ORDER BY gm.group_id, gm.sort_order ASC, u.id ASC`);
+    const groups = await db.all(`SELECT id, name, join_code, isolate_tracker, app_name, theme_color FROM groups WHERE id = ANY($1::int[])`, [groupIds]);
+    const members = await db.all(`SELECT gm.group_id, u.id, u.display_name as name, gm.sort_order FROM group_members gm JOIN users u ON gm.user_id = u.id WHERE gm.group_id = ANY($1::int[]) ORDER BY gm.group_id, gm.sort_order ASC, u.id ASC`, [groupIds]);
     
     const formattedGroups = groups.map(g => ({ ...g, members: members.filter(m => m.group_id === g.id) }));
 
@@ -214,8 +253,7 @@ app.get('/api/groups/grid', authenticate, async (req, res) => {
     });
 
     const uniqueUserIds = [...new Set(members.map(m => m.id))];
-    const placeholders = uniqueUserIds.map(() => '?').join(',');
-    const logs = uniqueUserIds.length > 0 ? await db.all(`SELECT user_id, food_item, group_id FROM logs WHERE week_id = ? AND user_id IN (${placeholders})`, [weekId, ...uniqueUserIds]) : [];
+    const logs = uniqueUserIds.length > 0 ? await db.all(`SELECT user_id, food_item, group_id FROM logs WHERE week_id = $1 AND user_id = ANY($2::int[])`, [weekId, uniqueUserIds]) : [];
     
     logs.forEach(l => {
         formattedGroups.forEach(g => {
@@ -234,7 +272,7 @@ app.get('/api/groups/grid', authenticate, async (req, res) => {
 
 app.post('/api/groups/create', authenticate, async (req, res) => {
     if (req.userRole !== 'parent' && req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
-    const result = await db.run('INSERT INTO groups (name, join_code) VALUES (?, ?)', [req.body.name, crypto.randomInt(100000, 1000000).toString()]);
+    const result = await db.runReturnId('INSERT INTO groups (name, join_code) VALUES (?, ?)', [req.body.name, crypto.randomInt(100000, 1000000).toString()]);
     await db.run('INSERT INTO group_members (group_id, user_id, sort_order) VALUES (?, ?, 0)', [result.lastID, req.userId]);
     res.json({ success: true });
 });
@@ -288,7 +326,7 @@ app.post('/api/groups/:groupId/create_user', authenticate, async (req, res) => {
     if (await db.get('SELECT id FROM users WHERE LOWER(username) = ?', [lowerUsername])) return res.status(400).json({ error: 'Username exists' });
     try {
         const linkCode = crypto.randomInt(100000, 1000000).toString();
-        const result = await db.run('INSERT INTO users (username, password, role, display_name, link_code) VALUES (?, ?, ?, ?, ?)', [lowerUsername, await bcrypt.hash(req.body.password, 10), 'user', req.body.displayName || rawUsername, linkCode]);
+        const result = await db.runReturnId('INSERT INTO users (username, password, role, display_name, link_code) VALUES (?, ?, ?, ?, ?)', [lowerUsername, await bcrypt.hash(req.body.password, 10), 'user', req.body.displayName || rawUsername, linkCode]);
         await db.run('INSERT INTO group_members (group_id, user_id, sort_order) VALUES (?, ?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM group_members WHERE group_id = ?))', [req.params.groupId, result.lastID, req.params.groupId]);
         res.json({ success: true });
     } catch (e) { res.status(400).json({ error: 'Error' }); }
@@ -321,7 +359,7 @@ app.post('/api/toggle/:targetId', authenticate, async (req, res) => {
     if (checked) {
         const q = targetGroupId === null ? 'group_id IS NULL' : 'group_id = ?';
         const params = targetGroupId === null ? [req.params.targetId, weekId, item] : [req.params.targetId, weekId, item, targetGroupId];
-        const exists = await db.get(`SELECT 1 FROM logs WHERE user_id = ? AND week_id = ? AND food_item = ? AND ${q}`, params);
+        const exists = await db.get(`SELECT 1 FROM logs WHERE user_id = $1 AND week_id = $2 AND food_item = $3 AND ${q}`, params);
         if (!exists) await db.run('INSERT INTO logs (user_id, week_id, food_item, group_id) VALUES (?, ?, ?, ?)', [req.params.targetId, weekId, item, targetGroupId]);
     } else {
         if (targetGroupId === null) await db.run('DELETE FROM logs WHERE user_id = ? AND week_id = ? AND food_item = ? AND group_id IS NULL', [req.params.targetId, weekId, item]);
@@ -376,19 +414,21 @@ app.get('/api/admin/settings', authenticate, async (req, res) => {
 
 app.put('/api/admin/settings', authenticate, async (req, res) => {
     if (req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
-    for (const [key, value] of Object.entries(req.body)) await db.run('UPDATE settings SET value = ? WHERE key = ?', [value, key]);
+    for (const [key, value] of Object.entries(req.body)) {
+        await db.run('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value', [key, value]);
+    }
     res.json({ success: true });
 });
 
 app.post('/api/admin/force-week', authenticate, async (req, res) => {
     if (req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
-    await db.run("INSERT INTO active_week (week_start_date) VALUES (date('now', 'localtime'))");
+    await db.run("INSERT INTO active_week (week_start_date) VALUES (CURRENT_DATE)");
     res.json({ success: true });
 });
 
 cron.schedule('1 0 * * *', async () => {
     const setting = await db.get("SELECT value FROM settings WHERE key = 'rollover_day'");
-    if (new Date().getDay() === (setting ? parseInt(setting.value) : 0)) await db.run("INSERT INTO active_week (week_start_date) VALUES (date('now', 'localtime'))");
+    if (new Date().getDay() === (setting ? parseInt(setting.value) : 0)) await db.run("INSERT INTO active_week (week_start_date) VALUES (CURRENT_DATE)");
 });
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, '..', 'client', 'dist', 'index.html')));
