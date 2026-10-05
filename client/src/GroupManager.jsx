@@ -27,7 +27,7 @@ export default function GroupManager({ groups, token, impersonatingId, apiFetch,
                     <button type="submit" className="form-btn" style={{ background: '#2563eb' }}>Create Group</button>
                 </form>
                 <form onSubmit={joinGroup} className="form-group">
-                    <strong style={{ width: '100%' }}>Join via Group PIN:</strong>
+                    <strong style={{ width: '100%' }}>Join Existing Group:</strong>
                     <input type="text" placeholder="Group PIN" value={joinGroupPin} onChange={e => setJoinGroupPin(e.target.value)} required className="form-input"/>
                     <button type="submit" className="form-btn" style={{ background: '#10b981' }}>Join Group</button>
                 </form>
@@ -50,8 +50,38 @@ function GroupCard({ g, token, impersonatingId, apiFetch, refreshTrigger }) {
     const [createDisplayName, setCreateDisplayName] = useState('');
     const [createPassword, setCreatePassword] = useState('');
     
-    const [linkUsername, setLinkUsername] = useState('');
-    const [linkPin, setLinkPin] = useState('');
+    // Dynamic array for multi-row Bulk Adding
+    const [bulkLinks, setBulkLinks] = useState([{ username: '', linkCode: '' }]);
+
+    const handleBulkChange = (index, field, val) => {
+        const newLinks = [...bulkLinks];
+        newLinks[index][field] = val;
+        setBulkLinks(newLinks);
+    };
+    
+    const addBulkRow = () => setBulkLinks([...bulkLinks, { username: '', linkCode: '' }]);
+    const removeBulkRow = (index) => setBulkLinks(bulkLinks.filter((_, i) => i !== index));
+
+    const addExistingUsersBulk = async (e) => {
+        e.preventDefault();
+        const toAdd = bulkLinks.filter(l => l.username.trim() !== '' && l.linkCode.trim() !== '');
+        if (toAdd.length === 0) return;
+
+        const res = await apiFetch(`/api/groups/${g.id}/add_users_bulk`, token, impersonatingId, { method: 'POST', body: JSON.stringify({ users: toAdd }) });
+        const data = await res.json();
+        
+        if (data.success) { 
+            setBulkLinks([{ username: '', linkCode: '' }]); 
+            refreshTrigger(); 
+            if (data.errors && data.errors.length > 0) {
+                alert(`Added ${data.added} users.\n\nFailed to add:\n${data.errors.join('\n')}`);
+            } else {
+                alert(`Successfully added ${data.added} user(s)!`);
+            }
+        } else {
+            alert(data.error);
+        }
+    };
 
     const saveGroupName = async () => {
         if (!editGroupName.trim()) return;
@@ -63,13 +93,6 @@ function GroupCard({ g, token, impersonatingId, apiFetch, refreshTrigger }) {
         if (!window.confirm("Remove this user from the group?")) return;
         await apiFetch(`/api/groups/${g.id}/member/${userId}`, token, impersonatingId, { method: 'DELETE' });
         refreshTrigger();
-    };
-
-    const addExistingUser = async (e) => {
-        e.preventDefault();
-        const res = await apiFetch(`/api/groups/${g.id}/add_user`, token, impersonatingId, { method: 'POST', body: JSON.stringify({ username: linkUsername.trim(), linkCode: linkPin.trim() }) });
-        const data = await res.json();
-        if (data.success) { setLinkUsername(''); setLinkPin(''); refreshTrigger(); alert("User Added!"); } else alert(data.error);
     };
 
     const createMemberInGroup = async (e) => {
@@ -142,16 +165,24 @@ function GroupCard({ g, token, impersonatingId, apiFetch, refreshTrigger }) {
                         <input type="text" placeholder="Username" value={createUsername} onChange={e => setCreateUsername(e.target.value)} required className="form-input"/>
                         <input type="text" placeholder="Display Name" value={createDisplayName} onChange={e => setCreateDisplayName(e.target.value)} className="form-input"/>
                         <input type="password" placeholder="Password" value={createPassword} onChange={e => setCreatePassword(e.target.value)} required className="form-input"/>
-                        <button type="submit" className="form-btn" style={{ background: '#3b82f6', flexBasis: '100%' }}>Create</button>
+                        <button type="submit" className="form-btn" style={{ background: '#3b82f6', flexBasis: '100%' }}>Create Account</button>
                     </div>
                 </form>
 
-                <form onSubmit={addExistingUser} style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '10px', background: '#f1f5f9', borderRadius: '4px', flexGrow: 1 }}>
-                    <strong style={{ fontSize: '14px', color: '#475569' }}>Add Existing User:</strong>
-                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                        <input type="text" placeholder="Their Username" value={linkUsername} onChange={e => setLinkUsername(e.target.value)} required className="form-input"/>
-                        <input type="text" placeholder="Their Personal PIN" value={linkPin} onChange={e => setLinkPin(e.target.value)} required className="form-input"/>
-                        <button type="submit" className="form-btn" style={{ background: '#10b981', flexBasis: '100%' }}>Add</button>
+                <form onSubmit={addExistingUsersBulk} style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '10px', background: '#f1f5f9', borderRadius: '4px', flexGrow: 1 }}>
+                    <strong style={{ fontSize: '14px', color: '#475569' }}>Add Existing User(s):</strong>
+                    {bulkLinks.map((link, idx) => (
+                        <div key={idx} style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                            <input type="text" placeholder="Their Username" value={link.username} onChange={e => handleBulkChange(idx, 'username', e.target.value)} required={idx === 0} className="form-input"/>
+                            <input type="text" placeholder="Their Personal PIN" value={link.linkCode} onChange={e => handleBulkChange(idx, 'linkCode', e.target.value)} required={idx === 0} className="form-input"/>
+                            {bulkLinks.length > 1 && (
+                                <button type="button" onClick={() => removeBulkRow(idx)} style={{ padding: '8px 12px', background: '#fca5a5', color: '#7f1d1d', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>X</button>
+                            )}
+                        </div>
+                    ))}
+                    <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                        <button type="button" onClick={addBulkRow} style={{ padding: '8px 16px', background: '#e2e8f0', color: '#475569', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer', flexGrow: 1 }}>+ Add Another Row</button>
+                        <button type="submit" className="form-btn" style={{ background: '#10b981', flexGrow: 2 }}>Add Users</button>
                     </div>
                 </form>
             </div>
