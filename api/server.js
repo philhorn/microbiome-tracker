@@ -1,4 +1,3 @@
-// --- SECTION 1: IMPORTS AND SETUP ---
 import express from 'express';
 import cors from 'cors';
 import bcrypt from 'bcrypt';
@@ -21,11 +20,8 @@ const ADMIN_CRED_FILE = path.join(__dirname, 'admin_credentials.txt');
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+const registerLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 10 });
 
-const registerLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 10, message: { error: 'Too many accounts created from this IP. Try again in an hour.' } });
-// --- END SECTION 1 ---
-
-// --- SECTION 2: DATABASE INITIALIZATION ---
 let db;
 (async () => {
     db = await open({ filename: path.join(__dirname, 'database.sqlite'), driver: sqlite3.Database });
@@ -45,6 +41,9 @@ let db;
     try { await db.exec("ALTER TABLE users ADD COLUMN is_suspended INTEGER DEFAULT 0;"); } catch (e) {}
     try { await db.exec("ALTER TABLE users ADD COLUMN failed_attempts INTEGER DEFAULT 0;"); } catch (e) {}
     try { await db.exec("ALTER TABLE users ADD COLUMN locked_until TEXT;"); } catch (e) {}
+    
+    // SaaS Pivot: Add group_id to items to support per-group checklists
+    try { await db.exec("ALTER TABLE foods ADD COLUMN group_id INTEGER;"); } catch (e) {}
 
     const foodCount = await db.get("SELECT COUNT(*) as c FROM foods");
     if (foodCount.c === 0) {
@@ -57,7 +56,7 @@ let db;
             "Herbs & Spices": ["Basil", "Cilantro", "Cinnamon", "Dill", "Ginger", "Mint", "Oregano", "Parsley", "Rosemary", "Sage", "Thyme", "Turmeric"],
             "Fermented & Other": ["Cocoa", "Kefir", "Kimchi", "Kombucha", "Miso", "Natto", "Olive Oil", "Red Wine", "Sauerkraut", "Tempeh", "Yogurt"]
         };
-        const stmt = await db.prepare("INSERT INTO foods (name, category) VALUES (?, ?)");
+        const stmt = await db.prepare("INSERT INTO foods (name, category, group_id) VALUES (?, ?, NULL)");
         for (const [cat, items] of Object.entries(defaultFoods)) {
             for (const item of items) await stmt.run([item, cat]);
         }
@@ -72,13 +71,10 @@ let db;
         fs.writeFileSync(ADMIN_CRED_FILE, `INITIAL SYSTEM SETUP\nUsername: admin\nTemporary Password: ${tempPassword}\n\nLog in and change immediately.\n`, { mode: 0o600 });
     }
 })();
-// --- END SECTION 2 ---
 
-// --- SECTION 3: TRUE IMPERSONATION AUTH MIDDLEWARE ---
 const authenticate = (req, res, next) => {
     const token = req.headers.authorization?.split(' ')[1];
     if (!token) return res.status(401).json({ error: 'Unauthorized' });
-    
     jwt.verify(token, SECRET, async (err, decoded) => {
         if (err) return res.status(403).json({ error: 'Forbidden' });
         const user = await db.get('SELECT is_suspended FROM users WHERE id = ?', [decoded.id]);
@@ -93,25 +89,20 @@ const authenticate = (req, res, next) => {
         next();
     });
 };
-// --- END SECTION 3 ---
 
-// --- SECTION 4: PUBLIC & AUTH ROUTES ---
 app.get('/api/setup-status', (req, res) => { res.json({ needsSetup: fs.existsSync(ADMIN_CRED_FILE) }); });
 
 app.post('/api/register', registerLimiter, async (req, res) => {
     const rawUsername = req.body.username;
     if (!rawUsername) return res.status(400).json({ error: 'Username required' });
     const lowerUsername = rawUsername.toLowerCase();
-    const displayName = req.body.displayName || rawUsername;
     const hash = await bcrypt.hash(req.body.password, 10);
-    const role = req.body.isParent ? 'parent' : 'user';
-    
     const existing = await db.get('SELECT id FROM users WHERE LOWER(username) = ?', [lowerUsername]);
     if (existing) return res.status(400).json({ error: 'Username exists' });
 
     try { 
         const linkCode = crypto.randomInt(100000, 1000000).toString();
-        const result = await db.run('INSERT INTO users (username, password, role, display_name, link_code) VALUES (?, ?, ?, ?, ?)', [lowerUsername, hash, role, displayName, linkCode]); 
+        const result = await db.run('INSERT INTO users (username, password, role, display_name, link_code) VALUES (?, ?, ?, ?, ?)', [lowerUsername, hash, req.body.isParent ? 'parent' : 'user', req.body.displayName || rawUsername, linkCode]); 
         const joinCode = crypto.randomInt(100000, 1000000).toString();
         const groupRes = await db.run("INSERT INTO groups (name, join_code) VALUES ('My Group', ?)", [joinCode]);
         await db.run("INSERT INTO group_members (group_id, user_id, sort_order) VALUES (?, ?, 0)", [groupRes.lastID, result.lastID]);
@@ -141,32 +132,32 @@ app.post('/api/login', async (req, res) => {
         res.status(401).json({ error: 'Invalid credentials' }); 
     }
 });
-// --- END SECTION 4 ---
 
-// --- SECTION 5: USER, GROUP & DATA ROUTES ---
-app.get('/api/foods', authenticate, async (req, res) => {
-app.post('/api/foods/manage', authenticate, async (req, res) => {
-    if (req.userRole !== 'admin' && req.userRole !== 'dietitian') return res.status(403).json({error: 'Denied'});
-    const { action, name, category, oldName } = req.body;
+app.get('/api/lists', authenticate, async (req, res) => {
+    const rows = await db.all('SELECT id, name, category, group_id FROM foods ORDER BY group_id, category, name');
+    res.json(rows);
+});
+
+app.post('/api/lists/manage', authenticate, async (req, res) => {
+    if (req.userRole !== 'admin' && req.userRole !== 'dietitian' && req.userRole !== 'parent') return res.status(403).json({error: 'Denied'});
+    const { action, name, category, oldName, group_id } = req.body;
+    
+    if (group_id === null && req.userRole !== 'admin') return res.status(403).json({error: 'Only admins can modify global templates.'});
+
     try {
         if (action === 'add') {
-            await db.run('INSERT INTO foods (name, category) VALUES (?, ?)', [name.trim(), category.trim()]);
+            await db.run('INSERT INTO foods (name, category, group_id) VALUES (?, ?, ?)', [name.trim(), category.trim(), group_id]);
         } else if (action === 'edit') {
-            await db.run('UPDATE foods SET name = ?, category = ? WHERE name = ?', [name.trim(), category.trim(), oldName]);
+            await db.run('UPDATE foods SET name = ?, category = ? WHERE name = ? AND (group_id = ? OR (group_id IS NULL AND ? IS NULL))', [name.trim(), category.trim(), oldName, group_id, group_id]);
             await db.run('UPDATE logs SET food_item = ? WHERE food_item = ?', [name.trim(), oldName]);
         } else if (action === 'delete') {
-            await db.run('DELETE FROM foods WHERE name = ?', [name]);
+            await db.run('DELETE FROM foods WHERE name = ? AND (group_id = ? OR (group_id IS NULL AND ? IS NULL))', [name, group_id, group_id]);
             await db.run('DELETE FROM logs WHERE food_item = ?', [name]);
         }
         res.json({ success: true });
     } catch(e) {
         res.status(400).json({ error: 'Database error' });
     }
-});
-    const rows = await db.all('SELECT name, category FROM foods ORDER BY category, name');
-    const categorized = {};
-    rows.forEach(r => { if (!categorized[r.category]) categorized[r.category] = []; categorized[r.category].push(r.name); });
-    res.json(categorized);
 });
 
 app.put('/api/user/profile', authenticate, async (req, res) => {
@@ -201,7 +192,7 @@ app.get('/api/groups/grid', authenticate, async (req, res) => {
     
     if (!myGroups.length) {
         const joinCode = crypto.randomInt(100000, 1000000).toString();
-        const groupRes = await db.run("INSERT INTO groups (name, join_code) VALUES ('My Family', ?)", [joinCode]);
+        const groupRes = await db.run("INSERT INTO groups (name, join_code) VALUES ('My Workspace', ?)", [joinCode]);
         await db.run("INSERT INTO group_members (group_id, user_id, sort_order) VALUES (?, ?, 0)", [groupRes.lastID, req.userId]);
         myGroups = [{ group_id: groupRes.lastID }];
     }
@@ -252,8 +243,7 @@ app.post('/api/groups/:groupId/add_users_bulk', authenticate, async (req, res) =
     if (req.userRole !== 'parent' && req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
     
     const users = req.body.users || [];
-    let added = 0;
-    let errors = [];
+    let added = 0; let errors = [];
 
     for (let u of users) {
         const targetUsername = (u.username || '').trim().toLowerCase();
@@ -261,18 +251,13 @@ app.post('/api/groups/:groupId/add_users_bulk', authenticate, async (req, res) =
         if (!targetUsername || !targetPin) continue;
 
         const target = await db.get('SELECT id FROM users WHERE LOWER(username) = ? AND link_code = ?', [targetUsername, targetPin]);
-        if (!target) {
-            errors.push(`${targetUsername} (Invalid)`);
-            continue;
-        }
+        if (!target) { errors.push(`${targetUsername} (Invalid)`); continue; }
 
         const exists = await db.get('SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?', [req.params.groupId, target.id]);
         if (!exists) {
             await db.run('INSERT INTO group_members (group_id, user_id, sort_order) VALUES (?, ?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM group_members WHERE group_id = ?))', [req.params.groupId, target.id, req.params.groupId]);
             added++;
-        } else {
-            errors.push(`${targetUsername} (Already in group)`);
-        }
+        } else { errors.push(`${targetUsername} (Already in group)`); }
     }
     res.json({ success: true, added, errors });
 });
@@ -311,30 +296,23 @@ app.post('/api/toggle/:targetId', authenticate, async (req, res) => {
     else { await db.run('DELETE FROM logs WHERE user_id = ? AND week_id = ? AND food_item = ?', [parseInt(req.params.targetId), weekId, req.body.item]); }
     res.json({ success: true });
 });
-// --- END SECTION 5 ---
 
-// --- SECTION 6: ADMIN ROUTES & SCHEDULER ---
 app.get('/api/admin/users', authenticate, async (req, res) => {
     if (req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
     res.json(await db.all(`SELECT id, username, display_name, role, link_code, is_suspended, failed_attempts, locked_until FROM users`));
 });
 
-// GLOBAL USER PROVISIONING
 app.post('/api/admin/create_user', authenticate, async (req, res) => {
     if (req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
     const rawUsername = req.body.username;
     if (!rawUsername) return res.status(400).json({ error: 'Username required' });
     const lowerUsername = rawUsername.toLowerCase();
-    const displayName = req.body.displayName || rawUsername;
-    const hash = await bcrypt.hash(req.body.password, 10);
-    const role = req.body.role || 'user';
-    
     const existing = await db.get('SELECT id FROM users WHERE LOWER(username) = ?', [lowerUsername]);
     if (existing) return res.status(400).json({ error: 'Username already exists' });
 
     try {
         const linkCode = crypto.randomInt(100000, 1000000).toString();
-        await db.run('INSERT INTO users (username, password, role, display_name, link_code) VALUES (?, ?, ?, ?, ?)', [lowerUsername, hash, role, displayName, linkCode]);
+        await db.run('INSERT INTO users (username, password, role, display_name, link_code) VALUES (?, ?, ?, ?, ?)', [lowerUsername, await bcrypt.hash(req.body.password, 10), req.body.role || 'user', req.body.displayName || rawUsername, linkCode]);
         res.json({ success: true });
     } catch (e) { res.status(400).json({ error: 'Error' }); }
 });
@@ -391,4 +369,3 @@ cron.schedule('1 0 * * *', async () => {
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 app.listen(PORT, () => console.log(`API running on port ${PORT}`));
-// --- END SECTION 6 ---

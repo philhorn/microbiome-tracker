@@ -4,9 +4,9 @@ import Auth from './Auth';
 import TrackerGrid from './TrackerGrid';
 import GroupManager from './GroupManager';
 import AdminPanel from './AdminPanel';
-import FoodManager from './FoodManager';
+import ListManager from './ListManager';
 
-const APP_VERSION = "2026.10.04.21.1";
+const APP_VERSION = "2026.10.04.21.2";
 
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem('token'));
@@ -25,7 +25,7 @@ export default function App() {
   const [gridData, setGridData] = useState({});
   const [adminUsers, setAdminUsers] = useState([]);
   const [sysSettings, setSysSettings] = useState({});
-  const [categorizedFoods, setCategorizedFoods] = useState({});
+  const [listItems, setListItems] = useState([]);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [setupNotice, setSetupNotice] = useState(false);
   
@@ -43,7 +43,7 @@ export default function App() {
 
   useEffect(() => {
     if (token) {
-        apiFetch('/api/foods', token, impersonatingUser?.id).then(r => r.json()).then(d => setCategorizedFoods(d)).catch(() => {});
+        apiFetch('/api/lists', token, impersonatingUser?.id).then(r => r.json()).then(d => setListItems(d)).catch(() => {});
         apiFetch('/api/weeks', token, impersonatingUser?.id)
             .then(r => { if (!r.ok) { hardReset(); throw new Error('Auth failed'); } return r.json(); })
             .then(data => { setWeeks(data); if (data.length > 0 && !selectedWeek) setSelectedWeek(data[0].id); })
@@ -106,17 +106,6 @@ export default function App() {
 
   if (!token) return <Auth setAuthData={setAuthData} setupNotice={setupNotice} />;
 
-  const displayedUsers = [];
-  const seenIds = new Set();
-  groups.filter(g => visibleGroupIds.includes(g.id)).forEach(g => {
-      g.members.forEach(m => { if (!seenIds.has(m.id)) { seenIds.add(m.id); displayedUsers.push(m); } });
-  });
-
-  const filteredCategories = Object.keys(categorizedFoods).reduce((acc, category) => {
-    const filtered = categorizedFoods[category].filter(f => f.toLowerCase().includes(searchTerm.toLowerCase()));
-    if (filtered.length > 0) acc[category] = filtered; return acc;
-  }, {});
-
   return (
     <div className="app-container" style={{ fontFamily: 'system-ui', maxWidth: '1200px', margin: '0 auto', padding: '15px' }}>
       <style>{`
@@ -149,11 +138,11 @@ export default function App() {
             </div>
           )}
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-            <button className={`nav-btn ${currentView === 'tracker' ? 'active' : ''}`} onClick={() => setCurrentView('tracker')}>Tracker</button>
+            <button className={`nav-btn ${currentView === 'tracker' ? 'active' : ''}`} onClick={() => setCurrentView('tracker')}>Checklists</button>
             {(activeRole === 'parent' || activeRole === 'admin') && <button className={`nav-btn ${currentView === 'groups' ? 'active' : ''}`} onClick={() => setCurrentView('groups')}>Group Settings</button>}
             <button className={`nav-btn ${currentView === 'profile' ? 'active' : ''}`} onClick={() => setCurrentView('profile')}>Profile</button>
             <button className={`nav-btn ${currentView === 'about' ? 'active' : ''}`} onClick={() => setCurrentView('about')}>About</button>
-            {!impersonatingUser && (activeRole === 'admin' || activeRole === 'dietitian') && <button className={`nav-btn ${currentView === 'foods' ? 'active' : ''}`} onClick={() => setCurrentView('foods')}>Food Database</button>}
+            {!impersonatingUser && (activeRole === 'admin' || activeRole === 'dietitian' || activeRole === 'parent') && <button className={`nav-btn ${currentView === 'lists' ? 'active' : ''}`} onClick={() => setCurrentView('lists')}>Checklist Manager</button>}
             {!impersonatingUser && activeRole === 'admin' && <button className={`nav-btn ${currentView === 'admin' ? 'active' : ''}`} onClick={() => setCurrentView('admin')}>Admin</button>}
           </div>
         </div>
@@ -162,14 +151,14 @@ export default function App() {
 
       {currentView === 'about' && (
         <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '8px', border: '1px solid #e2e8f0', lineHeight: '1.6' }}>
-          <h3>The Goal: 30 Plant-Based Foods a Week</h3>
+          <h3>Multi-Tenant Checklist Engine</h3>
           <p>Scientific research indicates that eating 30 or more different plant-based foods each week significantly diversifies the gut microbiome.</p>
+          <p>This tracking engine is designed to accommodate multiple groups seamlessly. Whether tracking weekly food intake or managing workspace opening procedures, each checklist belongs to its designated group.</p>
         </div>
       )}
 
       {currentView === 'profile' && (
         <div style={{ maxWidth: '600px' }}>
-          
           {!impersonatingUser && (
               <div style={{ background: '#fef3c7', padding: '20px', borderRadius: '8px', border: '1px solid #fcd34d', marginBottom: '20px' }}>
                 <h3 style={{ margin: '0 0 10px 0', color: '#92400e' }}>Personal Connection PIN: <span style={{ letterSpacing: '2px', fontSize: '24px', marginLeft: '10px', background: 'white', padding: '4px 8px', borderRadius: '4px' }}>{myLinkCode}</span></h3>
@@ -197,11 +186,11 @@ export default function App() {
 
       {currentView === 'groups' && (activeRole === 'parent' || activeRole === 'admin') && <GroupManager groups={groups} token={token} impersonatingId={impersonatingUser?.id} apiFetch={apiFetch} refreshTrigger={() => setRefreshTrigger(p=>p+1)} />}
       
-      {currentView === 'foods' && !impersonatingUser && (activeRole === 'admin' || activeRole === 'dietitian') && <FoodManager categorizedFoods={categorizedFoods} token={token} impersonatingId={impersonatingUser?.id} apiFetch={apiFetch} refreshTrigger={() => setRefreshTrigger(p=>p+1)} />}
+      {currentView === 'lists' && !impersonatingUser && (activeRole === 'admin' || activeRole === 'dietitian' || activeRole === 'parent') && <ListManager listItems={listItems} groups={groups} activeRole={activeRole} token={token} impersonatingId={impersonatingUser?.id} apiFetch={apiFetch} refreshTrigger={() => setRefreshTrigger(p=>p+1)} />}
 
       {currentView === 'admin' && !impersonatingUser && activeRole === 'admin' && <AdminPanel adminUsers={adminUsers} sysSettings={sysSettings} token={token} apiFetch={apiFetch} refreshTrigger={() => setRefreshTrigger(p=>p+1)} setImpersonatingUser={(u) => { setImpersonatingUser(u); setProfileName(u.name); setCurrentView('tracker'); }} />}
 
-      {currentView === 'tracker' && (activeRole !== 'admin' || displayedUsers.length > 0) && (
+      {currentView === 'tracker' && (
         <>
           <div style={{ display: 'flex', gap: '15px', alignItems: 'center', marginBottom: '15px', flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', flexGrow: 1 }}>
@@ -214,9 +203,9 @@ export default function App() {
             <select value={selectedWeek || ''} onChange={(e) => setSelectedWeek(e.target.value)} style={{ padding: '8px', borderRadius: '4px', border: '1px solid #cbd5e1', background: 'white', fontWeight: 'bold' }}>
               {weeks.map((w, idx) => <option key={w.id} value={w.id}>{idx === 0 ? "Current Week" : "Week of " + w.week_start_date}</option>)}
             </select>
-            <input type="text" placeholder="Search foods..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="form-input" style={{ maxWidth: '200px' }}/>
+            <input type="text" placeholder="Search checklists..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="form-input" style={{ maxWidth: '200px' }}/>
           </div>
-          <TrackerGrid displayedUsers={displayedUsers} gridData={gridData} setGridData={setGridData} categorizedFoods={filteredCategories} activeRole={activeRole} impersonatingId={impersonatingUser?.id} selectedWeek={selectedWeek} apiFetch={apiFetch} token={token} />
+          <TrackerGrid groups={groups} visibleGroupIds={visibleGroupIds} gridData={gridData} setGridData={setGridData} listItems={listItems} searchTerm={searchTerm} activeRole={activeRole} impersonatingId={impersonatingUser?.id} selectedWeek={selectedWeek} apiFetch={apiFetch} token={token} />
         </>
       )}
 
