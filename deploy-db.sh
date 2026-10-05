@@ -10,7 +10,6 @@ fi
 su - postgres -c "psql -tc \"SELECT 1 FROM pg_database WHERE datname = 'microbiome'\" | grep -q 1 || psql -c \"CREATE DATABASE microbiome;\""
 su - postgres -c "psql -c \"ALTER USER postgres WITH PASSWORD 'admin123';\""
 
-# Ensure logo_url column exists in existing or fresh databases
 su - postgres -c "psql -d microbiome -c \"ALTER TABLE groups ADD COLUMN IF NOT EXISTS logo_url TEXT;\"" || true
 
 PG_CONF=$(find /etc/postgresql -name postgresql.conf | head -n 1)
