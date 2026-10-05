@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 
 const columnColors = ['#f0f9ff', '#f0fdf4', '#fefce8', '#fff1f2', '#f3e8ff', '#ecfeff', '#fdf4ff'];
 
-export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGridData, listItems, searchTerm, filterMode, effectiveUserId, activeRole, impersonatingId, selectedWeek, apiFetch, token }) {
+export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGridData, listItems, searchTerm, filterMode, sortMode, effectiveUserId, activeRole, impersonatingId, selectedWeek, apiFetch, token }) {
     const [collapsedCats, setCollapsedCats] = useState({});
     const [undoMemory, setUndoMemory] = useState({});
     const [colWidths, setColWidths] = useState(() => {
@@ -134,7 +134,6 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
             {visibleGroups.map(group => {
                 let groupItems = listItems.filter(i => (i.group_id === null || i.group_id === group.id) && i.name.toLowerCase().includes(searchTerm.toLowerCase()));
                 
-                // Advanced Filter Injection
                 if (filterMode === 'CHECKED') {
                     groupItems = groupItems.filter(i => (gridData[group.id]?.[effectiveUserId] || []).includes(i.name));
                 } else if (filterMode === 'UNCHECKED') {
@@ -149,7 +148,6 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
                     categorized[i.category].push(i);
                 });
                 
-                // Enforce Alphabetical Sorting for cleaner UX
                 const sortedCats = Object.keys(categorized).sort();
 
                 return (
@@ -177,8 +175,19 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
                                 {sortedCats.map(category => {
                                     const catKey = `${group.id}-${category}`;
                                     
-                                    // Enforce alphabetical sort on items inside the category
-                                    const sortedItems = categorized[category].sort((a, b) => a.name.localeCompare(b.name));
+                                    const sortedItems = categorized[category].sort((a, b) => {
+                                        const aChecked = (gridData[group.id]?.[effectiveUserId] || []).includes(a.name);
+                                        const bChecked = (gridData[group.id]?.[effectiveUserId] || []).includes(b.name);
+                                        
+                                        if (sortMode === 'CHECKED_FIRST') {
+                                            if (aChecked && !bChecked) return -1;
+                                            if (!aChecked && bChecked) return 1;
+                                        } else if (sortMode === 'UNCHECKED_FIRST') {
+                                            if (!aChecked && bChecked) return -1;
+                                            if (aChecked && !bChecked) return 1;
+                                        }
+                                        return a.name.localeCompare(b.name);
+                                    });
 
                                     return (
                                     <React.Fragment key={catKey}>

@@ -6,7 +6,7 @@ import GroupManager from './GroupManager';
 import AdminPanel from './AdminPanel';
 import ListManager from './ListManager';
 
-const APP_VERSION = "2026.10.04.21.4";
+const APP_VERSION = "2026.10.04.21.5";
 
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem('token'));
@@ -19,6 +19,7 @@ export default function App() {
   const [currentView, setCurrentView] = useState('tracker'); 
   const [searchTerm, setSearchTerm] = useState('');
   const [filterMode, setFilterMode] = useState('ALL');
+  const [sortMode, setSortMode] = useState('A-Z');
   
   const [groups, setGroups] = useState([]);
   const [visibleGroupIds, setVisibleGroupIds] = useState([]);
@@ -109,6 +110,12 @@ export default function App() {
 
   if (!token) return <Auth setAuthData={setAuthData} setupNotice={setupNotice} />;
 
+  const displayedUsers = [];
+  const seenIds = new Set();
+  groups.filter(g => visibleGroupIds.includes(g.id)).forEach(g => {
+      g.members.forEach(m => { if (!seenIds.has(m.id)) { seenIds.add(m.id); displayedUsers.push(m); } });
+  });
+
   return (
     <div className="app-container" style={{ fontFamily: 'system-ui', maxWidth: '1200px', margin: '0 auto', padding: '15px' }}>
       <style>{`
@@ -167,7 +174,6 @@ export default function App() {
                 <p style={{ margin: 0, fontSize: '14px', color: '#92400e' }}>Give this PIN to a Group Manager so they can pull you into their group.</p>
               </div>
           )}
-
           <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '20px' }}>
             <h3 style={{ marginTop: 0 }}>Update Profile</h3>
             <form onSubmit={updateProfile} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -187,9 +193,7 @@ export default function App() {
       )}
 
       {currentView === 'groups' && (activeRole === 'parent' || activeRole === 'admin') && <GroupManager groups={groups} token={token} impersonatingId={impersonatingUser?.id} apiFetch={apiFetch} refreshTrigger={() => setRefreshTrigger(p=>p+1)} />}
-      
       {currentView === 'lists' && !impersonatingUser && (activeRole === 'admin' || activeRole === 'dietitian' || activeRole === 'parent') && <ListManager listItems={listItems} groups={groups} activeRole={activeRole} token={token} impersonatingId={impersonatingUser?.id} apiFetch={apiFetch} refreshTrigger={() => setRefreshTrigger(p=>p+1)} />}
-
       {currentView === 'admin' && !impersonatingUser && activeRole === 'admin' && <AdminPanel adminUsers={adminUsers} sysSettings={sysSettings} token={token} apiFetch={apiFetch} refreshTrigger={() => setRefreshTrigger(p=>p+1)} setImpersonatingUser={(u) => { setImpersonatingUser(u); setProfileName(u.name); setCurrentView('tracker'); }} />}
 
       {currentView === 'tracker' && (
@@ -203,18 +207,26 @@ export default function App() {
                 ))}
             </div>
             
-            <select value={filterMode} onChange={(e) => setFilterMode(e.target.value)} style={{ padding: '8px', borderRadius: '4px', border: '1px solid #cbd5e1', background: '#f8fafc', fontWeight: 'bold', color: '#1e293b' }}>
-                <option value="ALL">🔍 Show All</option>
-                <option value="CHECKED">✅ Checked by Me</option>
-                <option value="UNCHECKED">❌ Unchecked by Me</option>
-            </select>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <select value={filterMode} onChange={(e) => setFilterMode(e.target.value)} style={{ padding: '8px', borderRadius: '4px', border: '1px solid #cbd5e1', background: '#f8fafc', fontWeight: 'bold', color: '#1e293b' }}>
+                    <option value="ALL">🔍 Filter: Show All</option>
+                    <option value="CHECKED">✅ Filter: Checked Only</option>
+                    <option value="UNCHECKED">❌ Filter: Unchecked Only</option>
+                </select>
+
+                <select value={sortMode} onChange={(e) => setSortMode(e.target.value)} style={{ padding: '8px', borderRadius: '4px', border: '1px solid #cbd5e1', background: '#f8fafc', fontWeight: 'bold', color: '#1e293b' }}>
+                    <option value="A-Z">🔤 Sort: A-Z</option>
+                    <option value="CHECKED_FIRST">✅ Sort: Checked First</option>
+                    <option value="UNCHECKED_FIRST">❌ Sort: Unchecked First</option>
+                </select>
+            </div>
 
             <select value={selectedWeek || ''} onChange={(e) => setSelectedWeek(e.target.value)} style={{ padding: '8px', borderRadius: '4px', border: '1px solid #cbd5e1', background: 'white', fontWeight: 'bold' }}>
               {weeks.map((w, idx) => <option key={w.id} value={w.id}>{idx === 0 ? "Current Week" : "Week of " + w.week_start_date}</option>)}
             </select>
             <input type="text" placeholder="Search checklists..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="form-input" style={{ maxWidth: '200px' }}/>
           </div>
-          <TrackerGrid groups={groups} visibleGroupIds={visibleGroupIds} gridData={gridData} setGridData={setGridData} listItems={listItems} searchTerm={searchTerm} filterMode={filterMode} effectiveUserId={effectiveUserId} activeRole={activeRole} impersonatingId={impersonatingUser?.id} selectedWeek={selectedWeek} apiFetch={apiFetch} token={token} />
+          <TrackerGrid groups={groups} visibleGroupIds={visibleGroupIds} gridData={gridData} setGridData={setGridData} listItems={listItems} searchTerm={searchTerm} filterMode={filterMode} sortMode={sortMode} effectiveUserId={effectiveUserId} activeRole={activeRole} impersonatingId={impersonatingUser?.id} selectedWeek={selectedWeek} apiFetch={apiFetch} token={token} />
         </>
       )}
 
