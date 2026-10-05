@@ -27,7 +27,7 @@ export default function GroupManager({ groups, token, impersonatingId, apiFetch,
                     <button type="submit" className="form-btn" style={{ background: '#2563eb' }}>Create Group</button>
                 </form>
                 <form onSubmit={joinGroup} className="form-group">
-                    <strong style={{ width: '100%' }}>Join Existing Group:</strong>
+                    <strong style={{ width: '100%' }}>Join via Group PIN:</strong>
                     <input type="text" placeholder="Group PIN" value={joinGroupPin} onChange={e => setJoinGroupPin(e.target.value)} required className="form-input"/>
                     <button type="submit" className="form-btn" style={{ background: '#10b981' }}>Join Group</button>
                 </form>
@@ -42,16 +42,23 @@ export default function GroupManager({ groups, token, impersonatingId, apiFetch,
 function GroupCard({ g, token, impersonatingId, apiFetch, refreshTrigger }) {
     const [editingMemberId, setEditingMemberId] = useState(null);
     const [editMemberName, setEditMemberName] = useState('');
-    
     const [editingGroupId, setEditingGroupId] = useState(false);
     const [editGroupName, setEditGroupName] = useState(g.name);
+    
+    // Tracking Mode Isolation Engine
+    const [isIsolated, setIsIsolated] = useState(g.isolate_tracker === 1);
     
     const [createUsername, setCreateUsername] = useState('');
     const [createDisplayName, setCreateDisplayName] = useState('');
     const [createPassword, setCreatePassword] = useState('');
-    
-    // Dynamic array for multi-row Bulk Adding
     const [bulkLinks, setBulkLinks] = useState([{ username: '', linkCode: '' }]);
+
+    const toggleIsolation = async () => {
+        const newVal = !isIsolated;
+        setIsIsolated(newVal);
+        await apiFetch(`/api/groups/${g.id}/mode`, token, impersonatingId, { method: 'PUT', body: JSON.stringify({ isolated: newVal }) });
+        refreshTrigger();
+    };
 
     const handleBulkChange = (index, field, val) => {
         const newLinks = [...bulkLinks];
@@ -73,14 +80,9 @@ function GroupCard({ g, token, impersonatingId, apiFetch, refreshTrigger }) {
         if (data.success) { 
             setBulkLinks([{ username: '', linkCode: '' }]); 
             refreshTrigger(); 
-            if (data.errors && data.errors.length > 0) {
-                alert(`Added ${data.added} users.\n\nFailed to add:\n${data.errors.join('\n')}`);
-            } else {
-                alert(`Successfully added ${data.added} user(s)!`);
-            }
-        } else {
-            alert(data.error);
-        }
+            if (data.errors && data.errors.length > 0) alert(`Added ${data.added} users.\n\nFailed to add:\n${data.errors.join('\n')}`);
+            else alert(`Successfully added ${data.added} user(s)!`);
+        } else alert(data.error);
     };
 
     const saveGroupName = async () => {
@@ -119,19 +121,29 @@ function GroupCard({ g, token, impersonatingId, apiFetch, refreshTrigger }) {
 
     return (
         <div style={{ background: 'white', padding: '15px', borderRadius: '8px', border: '2px solid #cbd5e1', marginBottom: '10px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px', marginBottom: '15px' }}>
-                {editingGroupId ? (
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                        <input value={editGroupName} onChange={e=>setEditGroupName(e.target.value)} className="form-input" style={{ width: '150px', padding: '4px' }}/>
-                        <button onClick={saveGroupName} style={{ padding: '4px 8px', background: '#10b981', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Save</button>
-                        <button onClick={()=>setEditingGroupId(false)} style={{ padding: '4px 8px', background: '#64748b', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Cancel</button>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px', marginBottom: '15px', flexWrap: 'wrap', gap: '10px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {editingGroupId ? (
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                            <input value={editGroupName} onChange={e=>setEditGroupName(e.target.value)} className="form-input" style={{ width: '150px', padding: '4px' }}/>
+                            <button onClick={saveGroupName} style={{ padding: '4px 8px', background: '#10b981', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Save</button>
+                            <button onClick={()=>setEditingGroupId(false)} style={{ padding: '4px 8px', background: '#64748b', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Cancel</button>
+                        </div>
+                    ) : (
+                        <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            {g.name}
+                            <button onClick={() => { setEditingGroupId(true); setEditGroupName(g.name); }} style={{ fontSize: '12px', padding: '2px 8px', background: '#e2e8f0', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Edit Name</button>
+                        </h3>
+                    )}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '14px' }}>
+                        <button onClick={toggleIsolation} style={{ padding: '4px 12px', borderRadius: '15px', border: '1px solid #cbd5e1', background: isIsolated ? '#fef2f2' : '#f0fdf4', color: isIsolated ? '#991b1b' : '#166534', cursor: 'pointer', fontWeight: 'bold' }}>
+                            {isIsolated ? '🔒 Isolated Checklist' : '🌐 Unified Checklist'}
+                        </button>
+                        <span style={{ color: '#64748b', fontStyle: 'italic', fontSize: '12px' }}>
+                            {isIsolated ? "Checks stay strictly inside this group." : "Global checks auto-sync to other Unified groups."}
+                        </span>
                     </div>
-                ) : (
-                    <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        {g.name}
-                        <button onClick={() => { setEditingGroupId(true); setEditGroupName(g.name); }} style={{ fontSize: '12px', padding: '2px 8px', background: '#e2e8f0', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Edit Name</button>
-                    </h3>
-                )}
+                </div>
                 <span style={{ background: '#fef3c7', padding: '6px 12px', borderRadius: '4px', border: '1px solid #fcd34d' }}><strong>Group PIN:</strong> {g.join_code}</span>
             </div>
             

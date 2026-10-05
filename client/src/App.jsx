@@ -6,7 +6,7 @@ import GroupManager from './GroupManager';
 import AdminPanel from './AdminPanel';
 import ListManager from './ListManager';
 
-const APP_VERSION = "2026.10.04.21.2";
+const APP_VERSION = "2026.10.04.21.3";
 
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem('token'));

@@ -14,29 +14,97 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
 
     const visibleGroups = groups.filter(g => visibleGroupIds.includes(g.id));
 
-    const handleToggle = async (memberId, itemName) => {
-        const isChecked = gridData[memberId]?.includes(itemName);
-        setGridData(prev => ({ ...prev, [memberId]: isChecked ? (prev[memberId] || []).filter(i => i !== itemName) : [...(prev[memberId] || []), itemName] }));
-        await apiFetch(`/api/toggle/${memberId}`, token, impersonatingId, { method: 'POST', body: JSON.stringify({ item: itemName, checked: !isChecked, weekId: selectedWeek }) });
+    if (visibleGroups.length === 0) {
+        return (
+            <div style={{ padding: '40px 20px', textAlign: 'center', background: '#f8fafc', borderRadius: '8px', border: '2px dashed #cbd5e1', color: '#64748b' }}>
+                <h3 style={{ margin: '0 0 10px 0' }}>No Workspace Selected</h3>
+                <p style={{ margin: 0 }}>Click a group toggle button above to view its checklist.</p>
+            </div>
+        );
+    }
+
+    const handleToggle = async (memberId, itemName, groupId, isGlobalItem, isUnifiedGroup) => {
+        const isChecked = (gridData[groupId]?.[memberId] || []).includes(itemName);
+        
+        // Optimistic UI Update reflecting true isolation vs unity logic
+        setGridData(prev => {
+            const next = JSON.parse(JSON.stringify(prev));
+            const appliesToAll = isGlobalItem && isUnifiedGroup;
+            
+            Object.keys(next).forEach(gid => {
+                const g = groups.find(x => x.id.toString() === gid.toString());
+                if (appliesToAll && g && g.isolate_tracker === 0) {
+                    if (next[gid] && next[gid][memberId]) {
+                        if (!isChecked && !next[gid][memberId].includes(itemName)) next[gid][memberId].push(itemName);
+                        else if (isChecked) next[gid][memberId] = next[gid][memberId].filter(i => i !== itemName);
+                    }
+                } else if (gid.toString() === groupId.toString()) {
+                    if (next[gid] && next[gid][memberId]) {
+                        if (!isChecked && !next[gid][memberId].includes(itemName)) next[gid][memberId].push(itemName);
+                        else if (isChecked) next[gid][memberId] = next[gid][memberId].filter(i => i !== itemName);
+                    }
+                }
+            });
+            return next;
+        });
+        
+        await apiFetch(`/api/toggle/${memberId}`, token, impersonatingId, { method: 'POST', body: JSON.stringify({ item: itemName, checked: !isChecked, weekId: selectedWeek, groupId }) });
     };
 
-    const handleCheckAll = async (itemName, action, group) => {
+    const handleCheckAll = async (itemName, action, group, isGlobalItem) => {
         const ids = group.members.map(m => m.id);
-        const next = { ...gridData };
+        const next = JSON.parse(JSON.stringify(gridData));
         const memKey = `${group.id}-${itemName}`;
         let finalCheckState = true;
+        const isUnifiedGroup = group.isolate_tracker === 0;
+        const appliesToAll = isGlobalItem && isUnifiedGroup;
 
         if (action === 'all') {
-            const currentlyChecked = ids.filter(id => (next[id] || []).includes(itemName));
+            const currentlyChecked = ids.filter(id => (next[group.id]?.[id] || []).includes(itemName));
             setUndoMemory(prev => ({ ...prev, [memKey]: currentlyChecked }));
-            ids.forEach(id => { if (!next[id]) next[id] = []; if (!next[id].includes(itemName)) next[id].push(itemName); });
+            
+            ids.forEach(id => {
+                Object.keys(next).forEach(gid => {
+                    const g = groups.find(x => x.id.toString() === gid.toString());
+                    if (appliesToAll && g && g.isolate_tracker === 0) {
+                        if (next[gid] && next[gid][id] && !next[gid][id].includes(itemName)) next[gid][id].push(itemName);
+                    } else if (gid.toString() === group.id.toString()) {
+                        if (next[gid] && next[gid][id] && !next[gid][id].includes(itemName)) next[gid][id].push(itemName);
+                    }
+                });
+            });
         } else if (action === 'revert') {
             const mem = undoMemory[memKey] || [];
-            ids.forEach(id => { next[id] = mem.includes(id) ? [...(next[id]||[]).filter(i=>i!==itemName), itemName] : (next[id]||[]).filter(i=>i!==itemName); });
+            ids.forEach(id => {
+                const shouldBeChecked = mem.includes(id);
+                Object.keys(next).forEach(gid => {
+                    const g = groups.find(x => x.id.toString() === gid.toString());
+                    if (appliesToAll && g && g.isolate_tracker === 0) {
+                        if (next[gid] && next[gid][id]) {
+                            if (shouldBeChecked && !next[gid][id].includes(itemName)) next[gid][id].push(itemName);
+                            else if (!shouldBeChecked) next[gid][id] = next[gid][id].filter(i=>i!==itemName);
+                        }
+                    } else if (gid.toString() === group.id.toString()) {
+                        if (next[gid] && next[gid][id]) {
+                            if (shouldBeChecked && !next[gid][id].includes(itemName)) next[gid][id].push(itemName);
+                            else if (!shouldBeChecked) next[gid][id] = next[gid][id].filter(i=>i!==itemName);
+                        }
+                    }
+                });
+            });
             setUndoMemory(prev => { const n={...prev}; delete n[memKey]; return n; });
             finalCheckState = 'revert'; 
         } else if (action === 'clear') {
-            ids.forEach(id => { if (next[id]) next[id] = next[id].filter(i => i !== itemName); });
+            ids.forEach(id => {
+                Object.keys(next).forEach(gid => {
+                    const g = groups.find(x => x.id.toString() === gid.toString());
+                    if (appliesToAll && g && g.isolate_tracker === 0) {
+                        if (next[gid] && next[gid][id]) next[gid][id] = next[gid][id].filter(i=>i!==itemName);
+                    } else if (gid.toString() === group.id.toString()) {
+                        if (next[gid] && next[gid][id]) next[gid][id] = next[gid][id].filter(i=>i!==itemName);
+                    }
+                });
+            });
             setUndoMemory(prev => { const n={...prev}; delete n[memKey]; return n; });
             finalCheckState = false;
         }
@@ -44,9 +112,9 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
 
         if (finalCheckState === 'revert') {
             const mem = undoMemory[memKey] || [];
-            await Promise.all(ids.map(id => apiFetch(`/api/toggle/${id}`, token, impersonatingId, { method: 'POST', body: JSON.stringify({ item: itemName, checked: mem.includes(id), weekId: selectedWeek }) })));
+            await Promise.all(ids.map(id => apiFetch(`/api/toggle/${id}`, token, impersonatingId, { method: 'POST', body: JSON.stringify({ item: itemName, checked: mem.includes(id), weekId: selectedWeek, groupId: group.id }) })));
         } else {
-            await Promise.all(ids.map(id => apiFetch(`/api/toggle/${id}`, token, impersonatingId, { method: 'POST', body: JSON.stringify({ item: itemName, checked: finalCheckState, weekId: selectedWeek }) })));
+            await Promise.all(ids.map(id => apiFetch(`/api/toggle/${id}`, token, impersonatingId, { method: 'POST', body: JSON.stringify({ item: itemName, checked: finalCheckState, weekId: selectedWeek, groupId: group.id }) })));
         }
     };
 
@@ -89,7 +157,7 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
                                     {group.members.map((m, idx) => (
                                         <th key={m.id} className="person-col cell-pad" style={{ width: colWidths[m.id] || 90, minWidth: 80, maxWidth: colWidths[m.id] || 90, background: columnColors[idx % columnColors.length], borderBottom: '2px solid #cbd5e1', borderRight: '1px solid #e2e8f0', top: '44px' }}>
                                             <span style={{ fontWeight: 'bold' }}>{m.name}</span><br/>
-                                            <span style={{ fontSize: '0.85em', fontWeight: 'normal', color: '#64748b' }}>Score: {gridData[m.id]?.length || 0}</span>
+                                            <span style={{ fontSize: '0.85em', fontWeight: 'normal', color: '#64748b' }}>Score: {gridData[group.id]?.[m.id]?.length || 0}</span>
                                             <div className="drag-handle" onMouseDown={(e) => handleDrag(e, m.id, 90)} />
                                         </th>
                                     ))}
@@ -109,7 +177,7 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
                                             ))}
                                         </tr>
                                         {!collapsedCats[catKey] && categorized[category].map(item => {
-                                            const checkedCount = group.members.filter(m => (gridData[m.id] || []).includes(item.name)).length;
+                                            const checkedCount = group.members.filter(m => (gridData[group.id]?.[m.id] || []).includes(item.name)).length;
                                             let allBtnText = "All", action = 'all', btnColor = '#cbd5e1', hoverTitle = "Check everyone in group";
                                             const memKey = `${group.id}-${item.name}`;
 
@@ -117,20 +185,23 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
                                                 if (undoMemory[memKey]) { allBtnText = "Revert"; action = 'revert'; btnColor = '#fde047'; hoverTitle = "Undo 'All'"; } 
                                                 else { allBtnText = "Clear"; action = 'clear'; btnColor = '#fca5a5'; hoverTitle = "Uncheck everyone"; }
                                             }
+                                            
+                                            const isGlobal = item.group_id === null;
+                                            const isUnified = group.isolate_tracker === 0;
 
                                             return (
                                             <tr key={item.name}>
                                                 <td className="food-col cell-pad" style={{ borderBottom: '1px solid #f1f5f9', borderRight: '2px solid #cbd5e1', textAlign: 'left', fontWeight: '500', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                                    <span style={{ color: item.group_id === null ? '#1d4ed8' : 'inherit' }}>
-                                                        {item.name} {item.group_id === null && <span style={{fontSize: '10px', background: '#dbeafe', padding: '2px 4px', borderRadius: '4px', marginLeft: '6px', fontWeight: 'bold'}}>Global</span>}
+                                                    <span style={{ color: isGlobal ? '#1d4ed8' : 'inherit' }}>
+                                                        {item.name} {isGlobal && <span style={{fontSize: '10px', background: '#dbeafe', padding: '2px 4px', borderRadius: '4px', marginLeft: '6px', fontWeight: 'bold'}}>Global</span>}
                                                     </span>
                                                     {(activeRole === 'parent' || activeRole === 'admin') && group.members.length > 0 && (
-                                                        <button onClick={() => handleCheckAll(item.name, action, group)} title={hoverTitle} style={{ fontSize: '12px', padding: '4px 8px', background: btnColor, border: 'none', borderRadius: '4px', cursor: 'pointer', minWidth: '45px' }}>{allBtnText}</button>
+                                                        <button onClick={() => handleCheckAll(item.name, action, group, isGlobal)} title={hoverTitle} style={{ fontSize: '12px', padding: '4px 8px', background: btnColor, border: 'none', borderRadius: '4px', cursor: 'pointer', minWidth: '45px' }}>{allBtnText}</button>
                                                     )}
                                                 </td>
                                                 {group.members.map((m, idx) => (
-                                                    <td key={m.id} className="cell-pad" onClick={() => handleToggle(m.id, item.name)} style={{ background: columnColors[idx % columnColors.length], borderBottom: '1px solid #f1f5f9', borderRight: '1px solid #e2e8f0', cursor: 'pointer' }}>
-                                                        <input type="checkbox" checked={gridData[m.id]?.includes(item.name) || false} readOnly style={{ width: '22px', height: '22px', pointerEvents: 'none' }} />
+                                                    <td key={m.id} className="cell-pad" onClick={() => handleToggle(m.id, item.name, group.id, isGlobal, isUnified)} style={{ background: columnColors[idx % columnColors.length], borderBottom: '1px solid #f1f5f9', borderRight: '1px solid #e2e8f0', cursor: 'pointer' }}>
+                                                        <input type="checkbox" checked={(gridData[group.id]?.[m.id] || []).includes(item.name)} readOnly style={{ width: '22px', height: '22px', pointerEvents: 'none' }} />
                                                     </td>
                                                 ))}
                                             </tr>

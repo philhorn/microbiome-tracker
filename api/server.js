@@ -41,9 +41,11 @@ let db;
     try { await db.exec("ALTER TABLE users ADD COLUMN is_suspended INTEGER DEFAULT 0;"); } catch (e) {}
     try { await db.exec("ALTER TABLE users ADD COLUMN failed_attempts INTEGER DEFAULT 0;"); } catch (e) {}
     try { await db.exec("ALTER TABLE users ADD COLUMN locked_until TEXT;"); } catch (e) {}
-    
-    // SaaS Pivot: Add group_id to items to support per-group checklists
     try { await db.exec("ALTER TABLE foods ADD COLUMN group_id INTEGER;"); } catch (e) {}
+    
+    // Core SaaS Migrations: Add group IDs to logs and isolation states to groups
+    try { await db.exec("ALTER TABLE logs ADD COLUMN group_id INTEGER;"); } catch (e) {}
+    try { await db.exec("ALTER TABLE groups ADD COLUMN isolate_tracker INTEGER DEFAULT 0;"); } catch (e) {}
 
     const foodCount = await db.get("SELECT COUNT(*) as c FROM foods");
     if (foodCount.c === 0) {
@@ -79,7 +81,6 @@ const authenticate = (req, res, next) => {
         if (err) return res.status(403).json({ error: 'Forbidden' });
         const user = await db.get('SELECT is_suspended FROM users WHERE id = ?', [decoded.id]);
         if (!user || user.is_suspended) return res.status(403).json({ error: 'Account suspended.' });
-        
         req.userId = decoded.id; req.userRole = decoded.role; 
         const impId = req.headers['x-impersonate'];
         if (impId && decoded.role === 'admin') {
@@ -133,21 +134,16 @@ app.post('/api/login', async (req, res) => {
     }
 });
 
-app.get('/api/lists', authenticate, async (req, res) => {
-    const rows = await db.all('SELECT id, name, category, group_id FROM foods ORDER BY group_id, category, name');
-    res.json(rows);
-});
+app.get('/api/lists', authenticate, async (req, res) => { res.json(await db.all('SELECT id, name, category, group_id FROM foods ORDER BY group_id, category, name')); });
 
 app.post('/api/lists/manage', authenticate, async (req, res) => {
     if (req.userRole !== 'admin' && req.userRole !== 'dietitian' && req.userRole !== 'parent') return res.status(403).json({error: 'Denied'});
     const { action, name, category, oldName, group_id } = req.body;
-    
     if (group_id === null && req.userRole !== 'admin') return res.status(403).json({error: 'Only admins can modify global templates.'});
 
     try {
-        if (action === 'add') {
-            await db.run('INSERT INTO foods (name, category, group_id) VALUES (?, ?, ?)', [name.trim(), category.trim(), group_id]);
-        } else if (action === 'edit') {
+        if (action === 'add') { await db.run('INSERT INTO foods (name, category, group_id) VALUES (?, ?, ?)', [name.trim(), category.trim(), group_id]); }
+        else if (action === 'edit') {
             await db.run('UPDATE foods SET name = ?, category = ? WHERE name = ? AND (group_id = ? OR (group_id IS NULL AND ? IS NULL))', [name.trim(), category.trim(), oldName, group_id, group_id]);
             await db.run('UPDATE logs SET food_item = ? WHERE food_item = ?', [name.trim(), oldName]);
         } else if (action === 'delete') {
@@ -155,9 +151,7 @@ app.post('/api/lists/manage', authenticate, async (req, res) => {
             await db.run('DELETE FROM logs WHERE food_item = ?', [name]);
         }
         res.json({ success: true });
-    } catch(e) {
-        res.status(400).json({ error: 'Database error' });
-    }
+    } catch(e) { res.status(400).json({ error: 'Database error' }); }
 });
 
 app.put('/api/user/profile', authenticate, async (req, res) => {
@@ -172,8 +166,7 @@ app.put('/api/user/profile', authenticate, async (req, res) => {
 
 app.post('/api/user/upgrade', authenticate, async (req, res) => {
     await db.run("UPDATE users SET role = 'parent' WHERE id = ?", [req.userId]);
-    const user = await db.get('SELECT * FROM users WHERE id = ?', [req.userId]);
-    res.json({ success: true, role: user.role });
+    res.json({ success: true, role: (await db.get('SELECT role FROM users WHERE id = ?', [req.userId])).role });
 });
 
 app.delete('/api/user/delete', authenticate, async (req, res) => {
@@ -186,6 +179,7 @@ app.delete('/api/user/delete', authenticate, async (req, res) => {
 
 app.get('/api/weeks', authenticate, async (req, res) => { res.json(await db.all('SELECT id, week_start_date FROM active_week ORDER BY id DESC')); });
 
+// The Core SaaS Payload: Re-architected gridData to support group isolation
 app.get('/api/groups/grid', authenticate, async (req, res) => {
     const weekId = req.query.weekId || (await db.get('SELECT MAX(id) as id FROM active_week')).id;
     let myGroups = await db.all('SELECT group_id FROM group_members WHERE user_id = ?', [req.userId]);
@@ -198,22 +192,42 @@ app.get('/api/groups/grid', authenticate, async (req, res) => {
     }
     
     const groupIds = myGroups.map(g => g.group_id);
-    const groups = await db.all(`SELECT id, name, join_code FROM groups WHERE id IN (${groupIds.join(',')})`);
+    const groups = await db.all(`SELECT id, name, join_code, isolate_tracker FROM groups WHERE id IN (${groupIds.join(',')})`);
     const members = await db.all(`SELECT gm.group_id, u.id, u.display_name as name, gm.sort_order FROM group_members gm JOIN users u ON gm.user_id = u.id WHERE gm.group_id IN (${groupIds.join(',')}) ORDER BY gm.group_id, gm.sort_order ASC, u.id ASC`);
+    
     const formattedGroups = groups.map(g => ({ ...g, members: members.filter(m => m.group_id === g.id) }));
+
+    const grid = {}; 
+    formattedGroups.forEach(g => {
+        grid[g.id] = {};
+        g.members.forEach(m => grid[g.id][m.id] = []);
+    });
 
     const uniqueUserIds = [...new Set(members.map(m => m.id))];
     const placeholders = uniqueUserIds.map(() => '?').join(',');
-    const logs = uniqueUserIds.length > 0 ? await db.all(`SELECT user_id, food_item FROM logs WHERE week_id = ? AND user_id IN (${placeholders})`, [weekId, ...uniqueUserIds]) : [];
-    const grid = {}; uniqueUserIds.forEach(id => grid[id] = []);
-    logs.forEach(l => grid[l.user_id].push(l.food_item));
+    const logs = uniqueUserIds.length > 0 ? await db.all(`SELECT user_id, food_item, group_id FROM logs WHERE week_id = ? AND user_id IN (${placeholders})`, [weekId, ...uniqueUserIds]) : [];
+    
+    logs.forEach(l => {
+        formattedGroups.forEach(g => {
+            if (grid[g.id] && grid[g.id][l.user_id] !== undefined) {
+                // If log is global and group is unified -> include
+                if (l.group_id === null && g.isolate_tracker === 0) {
+                    grid[g.id][l.user_id].push(l.food_item);
+                } 
+                // If log belongs specifically to this group -> include
+                else if (l.group_id === g.id) {
+                    grid[g.id][l.user_id].push(l.food_item);
+                }
+            }
+        });
+    });
+
     res.json({ groups: formattedGroups, grid });
 });
 
 app.post('/api/groups/create', authenticate, async (req, res) => {
     if (req.userRole !== 'parent' && req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
-    const joinCode = crypto.randomInt(100000, 1000000).toString();
-    const result = await db.run('INSERT INTO groups (name, join_code) VALUES (?, ?)', [req.body.name, joinCode]);
+    const result = await db.run('INSERT INTO groups (name, join_code) VALUES (?, ?)', [req.body.name, crypto.randomInt(100000, 1000000).toString()]);
     await db.run('INSERT INTO group_members (group_id, user_id, sort_order) VALUES (?, ?, 0)', [result.lastID, req.userId]);
     res.json({ success: true });
 });
@@ -232,6 +246,12 @@ app.put('/api/groups/:groupId', authenticate, async (req, res) => {
     res.json({ success: true });
 });
 
+app.put('/api/groups/:groupId/mode', authenticate, async (req, res) => {
+    if (req.userRole !== 'parent' && req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
+    await db.run('UPDATE groups SET isolate_tracker = ? WHERE id = ?', [req.body.isolated ? 1 : 0, req.params.groupId]);
+    res.json({ success: true });
+});
+
 app.delete('/api/groups/:groupId/member/:userId', authenticate, async (req, res) => {
     const targetId = parseInt(req.params.userId);
     if (req.userId !== targetId && req.userRole !== 'parent' && req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
@@ -241,35 +261,24 @@ app.delete('/api/groups/:groupId/member/:userId', authenticate, async (req, res)
 
 app.post('/api/groups/:groupId/add_users_bulk', authenticate, async (req, res) => {
     if (req.userRole !== 'parent' && req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
-    
     const users = req.body.users || [];
     let added = 0; let errors = [];
-
     for (let u of users) {
-        const targetUsername = (u.username || '').trim().toLowerCase();
-        const targetPin = (u.linkCode || '').trim();
-        if (!targetUsername || !targetPin) continue;
-
-        const target = await db.get('SELECT id FROM users WHERE LOWER(username) = ? AND link_code = ?', [targetUsername, targetPin]);
-        if (!target) { errors.push(`${targetUsername} (Invalid)`); continue; }
-
+        const tUser = (u.username || '').trim().toLowerCase(); const tPin = (u.linkCode || '').trim();
+        if (!tUser || !tPin) continue;
+        const target = await db.get('SELECT id FROM users WHERE LOWER(username) = ? AND link_code = ?', [tUser, tPin]);
+        if (!target) { errors.push(`${tUser} (Invalid)`); continue; }
         const exists = await db.get('SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?', [req.params.groupId, target.id]);
-        if (!exists) {
-            await db.run('INSERT INTO group_members (group_id, user_id, sort_order) VALUES (?, ?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM group_members WHERE group_id = ?))', [req.params.groupId, target.id, req.params.groupId]);
-            added++;
-        } else { errors.push(`${targetUsername} (Already in group)`); }
+        if (!exists) { await db.run('INSERT INTO group_members (group_id, user_id, sort_order) VALUES (?, ?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM group_members WHERE group_id = ?))', [req.params.groupId, target.id, req.params.groupId]); added++; } 
+        else { errors.push(`${tUser} (Already in group)`); }
     }
     res.json({ success: true, added, errors });
 });
 
 app.post('/api/groups/:groupId/create_user', authenticate, async (req, res) => {
     if (req.userRole !== 'parent' && req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
-    const access = await db.get('SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?', [req.params.groupId, req.userId]);
-    if (!access) return res.status(403).json({error: 'Denied'});
     const lowerUsername = req.body.username.toLowerCase();
-    const existing = await db.get('SELECT id FROM users WHERE LOWER(username) = ?', [lowerUsername]);
-    if (existing) return res.status(400).json({ error: 'Username exists' });
-
+    if (await db.get('SELECT id FROM users WHERE LOWER(username) = ?', [lowerUsername])) return res.status(400).json({ error: 'Username exists' });
     try {
         const linkCode = crypto.randomInt(100000, 1000000).toString();
         const result = await db.run('INSERT INTO users (username, password, role, display_name, link_code) VALUES (?, ?, ?, ?, ?)', [lowerUsername, await bcrypt.hash(req.body.password, 10), 'user', req.body.displayName || rawUsername, linkCode]);
@@ -292,8 +301,26 @@ app.post('/api/groups/:groupId/reorder', authenticate, async (req, res) => {
 
 app.post('/api/toggle/:targetId', authenticate, async (req, res) => {
     const weekId = req.body.weekId || (await db.get('SELECT MAX(id) as id FROM active_week')).id;
-    if (req.body.checked) { await db.run('INSERT INTO logs (user_id, week_id, food_item) VALUES (?, ?, ?)', [parseInt(req.params.targetId), weekId, req.body.item]); } 
-    else { await db.run('DELETE FROM logs WHERE user_id = ? AND week_id = ? AND food_item = ?', [parseInt(req.params.targetId), weekId, req.body.item]); }
+    const { groupId, item, checked } = req.body;
+    
+    const group = await db.get('SELECT isolate_tracker FROM groups WHERE id = ?', [groupId]);
+    const food = await db.get('SELECT group_id FROM foods WHERE name = ?', [item]);
+    
+    // Core Isolation Check
+    let targetGroupId = groupId;
+    if (food && food.group_id === null && group && group.isolate_tracker === 0) {
+        targetGroupId = null; // Sync Globally!
+    }
+    
+    if (checked) {
+        const q = targetGroupId === null ? 'group_id IS NULL' : 'group_id = ?';
+        const params = targetGroupId === null ? [req.params.targetId, weekId, item] : [req.params.targetId, weekId, item, targetGroupId];
+        const exists = await db.get(`SELECT 1 FROM logs WHERE user_id = ? AND week_id = ? AND food_item = ? AND ${q}`, params);
+        if (!exists) await db.run('INSERT INTO logs (user_id, week_id, food_item, group_id) VALUES (?, ?, ?, ?)', [req.params.targetId, weekId, item, targetGroupId]);
+    } else {
+        if (targetGroupId === null) await db.run('DELETE FROM logs WHERE user_id = ? AND week_id = ? AND food_item = ? AND group_id IS NULL', [req.params.targetId, weekId, item]);
+        else await db.run('DELETE FROM logs WHERE user_id = ? AND week_id = ? AND food_item = ? AND group_id = ?', [req.params.targetId, weekId, item, targetGroupId]);
+    }
     res.json({ success: true });
 });
 
@@ -304,15 +331,9 @@ app.get('/api/admin/users', authenticate, async (req, res) => {
 
 app.post('/api/admin/create_user', authenticate, async (req, res) => {
     if (req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
-    const rawUsername = req.body.username;
-    if (!rawUsername) return res.status(400).json({ error: 'Username required' });
-    const lowerUsername = rawUsername.toLowerCase();
-    const existing = await db.get('SELECT id FROM users WHERE LOWER(username) = ?', [lowerUsername]);
-    if (existing) return res.status(400).json({ error: 'Username already exists' });
-
+    if (await db.get('SELECT id FROM users WHERE LOWER(username) = ?', [req.body.username.toLowerCase()])) return res.status(400).json({ error: 'Username already exists' });
     try {
-        const linkCode = crypto.randomInt(100000, 1000000).toString();
-        await db.run('INSERT INTO users (username, password, role, display_name, link_code) VALUES (?, ?, ?, ?, ?)', [lowerUsername, await bcrypt.hash(req.body.password, 10), req.body.role || 'user', req.body.displayName || rawUsername, linkCode]);
+        await db.run('INSERT INTO users (username, password, role, display_name, link_code) VALUES (?, ?, ?, ?, ?)', [req.body.username.toLowerCase(), await bcrypt.hash(req.body.password, 10), req.body.role || 'user', req.body.displayName || req.body.username, crypto.randomInt(100000, 1000000).toString()]);
         res.json({ success: true });
     } catch (e) { res.status(400).json({ error: 'Error' }); }
 });
@@ -327,16 +348,14 @@ app.post('/api/admin/suspend/:id', authenticate, async (req, res) => {
 
 app.post('/api/admin/role/:id', authenticate, async (req, res) => {
     if (req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
-    const target = await db.get('SELECT username FROM users WHERE id = ?', [req.params.id]);
-    if (target && target.username === 'admin') return res.status(403).json({error: 'Cannot modify master admin'});
+    if ((await db.get('SELECT username FROM users WHERE id = ?', [req.params.id]))?.username === 'admin') return res.status(403).json({error: 'Cannot modify master admin'});
     await db.run('UPDATE users SET role = ? WHERE id = ?', [req.body.role, req.params.id]);
     res.json({ success: true });
 });
 
 app.delete('/api/admin/delete/:id', authenticate, async (req, res) => {
     if (req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
-    const target = await db.get('SELECT username FROM users WHERE id = ?', [req.params.id]);
-    if (target && target.username === 'admin') return res.status(403).json({error: 'Cannot delete master admin'});
+    if ((await db.get('SELECT username FROM users WHERE id = ?', [req.params.id]))?.username === 'admin') return res.status(403).json({error: 'Cannot delete master admin'});
     await db.run('DELETE FROM group_members WHERE user_id = ?', [req.params.id]);
     await db.run('DELETE FROM logs WHERE user_id = ?', [req.params.id]);
     await db.run('DELETE FROM users WHERE id = ?', [req.params.id]);
@@ -345,8 +364,7 @@ app.delete('/api/admin/delete/:id', authenticate, async (req, res) => {
 
 app.get('/api/admin/settings', authenticate, async (req, res) => {
     if (req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
-    const settings = {};
-    (await db.all('SELECT key, value FROM settings')).forEach(r => settings[r.key] = r.value);
+    const settings = {}; (await db.all('SELECT key, value FROM settings')).forEach(r => settings[r.key] = r.value);
     res.json(settings);
 });
 
