@@ -20,8 +20,7 @@ const ADMIN_CRED_FILE = path.join(__dirname, 'admin_credentials.txt');
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
-
-const registerLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 10, message: { error: 'Too many accounts created from this IP. Try again in an hour.' } });
+const registerLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 10 });
 
 let db;
 (async () => {
@@ -101,7 +100,8 @@ app.post('/api/register', registerLimiter, async (req, res) => {
     if (existing) return res.status(400).json({ error: 'Username exists' });
 
     try { 
-        const result = await db.run('INSERT INTO users (username, password, role, display_name) VALUES (?, ?, ?, ?)', [lowerUsername, hash, req.body.isParent ? 'parent' : 'user', req.body.displayName || rawUsername]); 
+        const linkCode = crypto.randomInt(100000, 1000000).toString();
+        const result = await db.run('INSERT INTO users (username, password, role, display_name, link_code) VALUES (?, ?, ?, ?, ?)', [lowerUsername, hash, req.body.isParent ? 'parent' : 'user', req.body.displayName || rawUsername, linkCode]); 
         const joinCode = crypto.randomInt(100000, 1000000).toString();
         const groupRes = await db.run("INSERT INTO groups (name, join_code) VALUES ('My Family', ?)", [joinCode]);
         await db.run("INSERT INTO group_members (group_id, user_id, sort_order) VALUES (?, ?, 0)", [groupRes.lastID, result.lastID]);
@@ -117,7 +117,7 @@ app.post('/api/login', async (req, res) => {
 
     if (await bcrypt.compare(req.body.password, user.password)) {
         await db.run('UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE id = ?', [user.id]);
-        res.json({ token: jwt.sign({ id: user.id, username: user.username, role: user.role }, SECRET), id: user.id, username: user.username, role: user.role, name: user.display_name });
+        res.json({ token: jwt.sign({ id: user.id, username: user.username, role: user.role }, SECRET), id: user.id, username: user.username, role: user.role, name: user.display_name, link_code: user.link_code });
     } else { 
         const attempts = (user.failed_attempts || 0) + 1;
         const limitSettings = await db.get("SELECT value FROM settings WHERE key = 'max_attempts'");
@@ -145,7 +145,7 @@ app.put('/api/user/profile', authenticate, async (req, res) => {
 app.post('/api/user/upgrade', authenticate, async (req, res) => {
     await db.run("UPDATE users SET role = 'parent' WHERE id = ?", [req.userId]);
     const user = await db.get('SELECT * FROM users WHERE id = ?', [req.userId]);
-    res.json({ success: true, token: jwt.sign({ id: user.id, username: user.username, role: user.role }, SECRET), role: user.role });
+    res.json({ success: true, role: user.role });
 });
 
 app.delete('/api/user/delete', authenticate, async (req, res) => {
@@ -198,6 +198,28 @@ app.post('/api/groups/join', authenticate, async (req, res) => {
     res.json({ success: true });
 });
 
+app.put('/api/groups/:groupId', authenticate, async (req, res) => {
+    if (req.userRole !== 'parent' && req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
+    await db.run('UPDATE groups SET name = ? WHERE id = ?', [req.body.name, req.params.groupId]);
+    res.json({ success: true });
+});
+
+app.delete('/api/groups/:groupId/member/:userId', authenticate, async (req, res) => {
+    const targetId = parseInt(req.params.userId);
+    if (req.userId !== targetId && req.userRole !== 'parent' && req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
+    await db.run('DELETE FROM group_members WHERE group_id = ? AND user_id = ?', [req.params.groupId, targetId]);
+    res.json({ success: true });
+});
+
+app.post('/api/groups/:groupId/add_user', authenticate, async (req, res) => {
+    if (req.userRole !== 'parent' && req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
+    const target = await db.get('SELECT id FROM users WHERE LOWER(username) = ? AND link_code = ?', [(req.body.username || '').toLowerCase(), req.body.linkCode]);
+    if (!target) return res.status(404).json({error: 'Invalid username or User PIN'});
+    const exists = await db.get('SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?', [req.params.groupId, target.id]);
+    if (!exists) await db.run('INSERT INTO group_members (group_id, user_id, sort_order) VALUES (?, ?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM group_members WHERE group_id = ?))', [req.params.groupId, target.id, req.params.groupId]);
+    res.json({ success: true });
+});
+
 app.post('/api/groups/:groupId/create_user', authenticate, async (req, res) => {
     if (req.userRole !== 'parent' && req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
     const access = await db.get('SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?', [req.params.groupId, req.userId]);
@@ -207,7 +229,8 @@ app.post('/api/groups/:groupId/create_user', authenticate, async (req, res) => {
     if (existing) return res.status(400).json({ error: 'Username exists' });
 
     try {
-        const result = await db.run('INSERT INTO users (username, password, role, display_name) VALUES (?, ?, ?, ?)', [lowerUsername, await bcrypt.hash(req.body.password, 10), 'user', req.body.displayName || rawUsername]);
+        const linkCode = crypto.randomInt(100000, 1000000).toString();
+        const result = await db.run('INSERT INTO users (username, password, role, display_name, link_code) VALUES (?, ?, ?, ?, ?)', [lowerUsername, await bcrypt.hash(req.body.password, 10), 'user', req.body.displayName || rawUsername, linkCode]);
         await db.run('INSERT INTO group_members (group_id, user_id, sort_order) VALUES (?, ?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM group_members WHERE group_id = ?))', [req.params.groupId, result.lastID, req.params.groupId]);
         res.json({ success: true });
     } catch (e) { res.status(400).json({ error: 'Error' }); }
@@ -234,7 +257,7 @@ app.post('/api/toggle/:targetId', authenticate, async (req, res) => {
 
 app.get('/api/admin/users', authenticate, async (req, res) => {
     if (req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
-    res.json(await db.all(`SELECT id, username, display_name, role, is_suspended, failed_attempts, locked_until FROM users`));
+    res.json(await db.all(`SELECT id, username, display_name, role, link_code, is_suspended, failed_attempts, locked_until FROM users`));
 });
 
 app.post('/api/admin/suspend/:id', authenticate, async (req, res) => {

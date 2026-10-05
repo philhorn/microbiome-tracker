@@ -15,7 +15,7 @@ export default function Auth({ setAuthData, setupNotice }) {
             const res = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
             const data = await res.json();
             if (data.token) {
-                setAuthData(data.token, data.role, data.name, data.username);
+                setAuthData(data.token, data.role, data.name, data.username, data.link_code);
             } else if (!isLoginView && data.success) {
                 setIsLoginView(true); alert("Registered! Please log in.");
             } else { alert(data.error); }

@@ -29,12 +29,13 @@ export default function AdminPanel({ adminUsers, sysSettings, token, apiFetch, r
             <div style={{ overflowX: 'auto', marginBottom: '30px' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', background: 'white', border: '1px solid #e2e8f0' }}>
                     <thead><tr style={{ background: '#f8fafc', borderBottom: '2px solid #cbd5e1' }}>
-                        <th style={{ padding: '12px' }}>ID</th><th style={{ padding: '12px' }}>User</th><th style={{ padding: '12px' }}>Role</th><th style={{ padding: '12px' }}>Status</th><th style={{ padding: '12px' }}>Actions</th>
+                        <th style={{ padding: '12px' }}>ID</th><th style={{ padding: '12px' }}>User</th><th style={{ padding: '12px' }}>User PIN</th><th style={{ padding: '12px' }}>Role</th><th style={{ padding: '12px' }}>Status</th><th style={{ padding: '12px' }}>Actions</th>
                     </tr></thead>
                     <tbody>{adminUsers.map(u => (
                         <tr key={u.id} style={{ borderBottom: '1px solid #e2e8f0', background: u.is_suspended ? '#fee2e2' : 'white' }}>
                             <td style={{ padding: '12px' }}>{u.id}</td>
                             <td style={{ padding: '12px' }}><strong>{u.display_name}</strong><br/><span style={{fontSize: '0.85em', color: '#64748b'}}>{u.username}</span></td>
+                            <td style={{ padding: '12px', fontWeight: 'bold' }}>{u.link_code}</td>
                             <td style={{ padding: '12px' }}>
                                 <select value={u.role} onChange={(e) => adminAction(u.id, 'role', e.target.value)} disabled={u.username === 'admin'} style={{ padding: '4px', borderRadius: '4px' }}>
                                     <option value="user">User</option><option value="parent">Parent</option>
