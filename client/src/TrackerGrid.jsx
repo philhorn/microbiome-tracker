@@ -131,6 +131,51 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
+            <style>{`
+                .tracker-table-container {
+                    max-height: 65vh;
+                    overflow: auto;
+                    border: 1px solid #cbd5e1;
+                    border-radius: 8px;
+                    background: white;
+                    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+                }
+                .tracker-table {
+                    border-collapse: separate;
+                    border-spacing: 0;
+                    width: 100%;
+                    text-align: center;
+                }
+                /* Sticky Member Header Row */
+                .tracker-table th.person-col {
+                    position: sticky;
+                    top: 0;
+                    z-index: 30;
+                }
+                /* Sticky Top-Left Corner (Task / Item Header) */
+                .tracker-table th.food-col-header {
+                    position: sticky;
+                    top: 0;
+                    left: 0;
+                    z-index: 40;
+                    background: #f1f5f9;
+                }
+                /* Sticky Task Item Cells (Left Column) */
+                .tracker-table td.food-col-cell {
+                    position: sticky;
+                    left: 0;
+                    z-index: 20;
+                    background: white;
+                }
+                /* Sticky Category Row Cells */
+                .tracker-table td.cat-col-cell {
+                    position: sticky;
+                    left: 0;
+                    z-index: 20;
+                    background: #cbd5e1;
+                }
+            `}</style>
+
             {visibleGroups.map(group => {
                 let groupItems = listItems.filter(i => (i.group_id === null || i.group_id === group.id) && i.name.toLowerCase().includes(searchTerm.toLowerCase()));
                 
@@ -151,21 +196,21 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
                 const sortedCats = Object.keys(categorized).sort();
 
                 return (
-                    <div key={group.id} style={{ border: '1px solid #cbd5e1', borderRadius: '8px', background: 'white', overflow: 'hidden', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}>
+                    <div key={group.id} style={{ border: '1px solid #cbd5e1', borderRadius: '8px', background: 'white', overflow: 'hidden' }}>
                         <div style={{ background: '#1e293b', color: 'white', padding: '12px 15px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <h3 style={{ margin: 0 }}>{group.name}</h3>
                             <span style={{ fontSize: '12px', background: '#334155', padding: '4px 10px', borderRadius: '12px', fontWeight: 'bold' }}>{group.members.length} Members</span>
                         </div>
                         
-                        <div style={{ maxHeight: '65vh', overflow: 'auto', WebkitOverflowScrolling: 'touch' }}>
-                            <table style={{ borderCollapse: 'separate', borderSpacing: 0, width: '100%', textAlign: 'center' }}>
+                        <div className="tracker-table-container">
+                            <table className="tracker-table">
                                 <thead>
                                     <tr>
-                                        <th className="food-col cell-pad" style={{ top: 0, zIndex: 40, width: colWidths['food'] || 160, minWidth: 120, maxWidth: colWidths['food'] || 160, borderBottom: '2px solid #94a3b8', borderRight: '2px solid #94a3b8', textAlign: 'left', background: '#f1f5f9', color: '#0f172a', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
+                                        <th className="food-col-header cell-pad" style={{ width: colWidths['food'] || 160, minWidth: 120, maxWidth: colWidths['food'] || 160, borderBottom: '2px solid #94a3b8', borderRight: '2px solid #94a3b8', textAlign: 'left' }}>
                                             Task / Item <div className="drag-handle" onMouseDown={(e) => handleDrag(e, 'food', 160)} />
                                         </th>
                                         {group.members.map((m, idx) => (
-                                            <th key={m.id} className="person-col cell-pad" style={{ top: 0, zIndex: 20, width: colWidths[m.id] || 90, minWidth: 80, maxWidth: colWidths[m.id] || 90, background: columnColors[idx % columnColors.length], borderBottom: '2px solid #94a3b8', borderRight: '1px solid #e2e8f0', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
+                                            <th key={m.id} className="person-col cell-pad" style={{ width: colWidths[m.id] || 90, minWidth: 80, maxWidth: colWidths[m.id] || 90, background: columnColors[idx % columnColors.length], borderBottom: '2px solid #94a3b8', borderRight: '1px solid #e2e8f0' }}>
                                                 <span style={{ fontWeight: 'bold' }}>{m.name}</span><br/>
                                                 <span style={{ fontSize: '0.85em', fontWeight: 'normal', color: '#64748b' }}>Score: {gridData[group.id]?.[m.id]?.length || 0}</span>
                                                 <div className="drag-handle" onMouseDown={(e) => handleDrag(e, m.id, 90)} />
@@ -194,11 +239,11 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
                                         return (
                                         <React.Fragment key={catKey}>
                                             <tr>
-                                                <td onClick={() => setCollapsedCats({...collapsedCats, [catKey]: !collapsedCats[catKey]})} className="food-col cell-pad" style={{ background: '#cbd5e1', borderBottom: '2px solid #94a3b8', borderRight: '2px solid #94a3b8', textAlign: 'left', fontWeight: 'bold', cursor: 'pointer', color: '#0f172a', fontSize: '14px' }}>
+                                                <td onClick={() => setCollapsedCats({...collapsedCats, [catKey]: !collapsedCats[catKey]})} className="cat-col-cell cell-pad" style={{ borderBottom: '2px solid #94a3b8', borderRight: '2px solid #94a3b8', textAlign: 'left', fontWeight: 'bold', cursor: 'pointer', color: '#0f172a', fontSize: '14px' }}>
                                                     {collapsedCats[catKey] ? '▶' : '▼'} {category}
                                                 </td>
                                                 {group.members.map(m => (
-                                                    <td key={m.id} className="cell-pad" style={{ background: '#e2e8f0', borderBottom: '2px solid #94a3b8', borderRight: '1px solid #cbd5e1' }}></td>
+                                                    <td key={m.id} className="cell-pad" style={{ background: '#e2e8f0', borderBottom: '2px solid #94a3b8', borderRight: '1px solid #c5cffd' }}></td>
                                                 ))}
                                             </tr>
                                             {!collapsedCats[catKey] && sortedItems.map(item => {
@@ -216,7 +261,7 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
 
                                                 return (
                                                 <tr key={item.name}>
-                                                    <td className="food-col cell-pad" style={{ borderBottom: '1px solid #f1f5f9', borderRight: '2px solid #cbd5e1', textAlign: 'left', fontWeight: '500', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                    <td className="food-col-cell cell-pad" style={{ borderBottom: '1px solid #f1f5f9', borderRight: '2px solid #cbd5e1', textAlign: 'left', fontWeight: '500', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                                         <span style={{ color: isGlobal ? '#1d4ed8' : 'inherit' }}>
                                                             {item.name} {isGlobal && <span style={{fontSize: '10px', background: '#dbeafe', padding: '2px 4px', borderRadius: '4px', marginLeft: '6px', fontWeight: 'bold'}}>Global</span>}
                                                         </span>
