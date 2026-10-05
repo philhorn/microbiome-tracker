@@ -20,7 +20,7 @@ const ADMIN_CRED_FILE = path.join(__dirname, 'admin_credentials.txt');
 
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, '..', 'client', 'dist')));
 
 // FIX: Trust Cloudflare Tunnel Proxy for Rate Limiting
 app.set('trust proxy', 1);
@@ -74,7 +74,7 @@ app.post('/api/webhook', (req, res) => {
     if (!authHeader) return res.status(403).send('Denied');
     res.status(200).send('Build triggered');
     console.log('GitHub Push detected. Triggering deployment...');
-    exec('/root/update.sh', (err, stdout, stderr) => {
+    exec('bash ../deploy.sh', (err, stdout, stderr) => {
         if (err) console.error(`Deployment failed: ${err}`);
         else console.log(`Deployment successful:\n${stdout}`);
     });
@@ -391,5 +391,5 @@ cron.schedule('1 0 * * *', async () => {
     if (new Date().getDay() === (setting ? parseInt(setting.value) : 0)) await db.run("INSERT INTO active_week (week_start_date) VALUES (date('now', 'localtime'))");
 });
 
-app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+app.get('*', (req, res) => res.sendFile(path.join(__dirname, '..', 'client', 'dist', 'index.html')));
 app.listen(PORT, () => console.log(`API running on port ${PORT}`));
