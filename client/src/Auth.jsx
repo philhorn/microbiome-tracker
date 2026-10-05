@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 
+const APP_VERSION = "2026.10.04.21.1";
+
 export default function Auth({ setAuthData, setupNotice }) {
     const [isLoginView, setIsLoginView] = useState(true);
     const [username, setUsername] = useState('');
@@ -25,7 +27,6 @@ export default function Auth({ setAuthData, setupNotice }) {
     return (
         <div style={{ maxWidth: '400px', margin: '50px auto', fontFamily: 'system-ui', padding: '24px', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
             
-            {/* Development Warning Banner */}
             <div style={{ background: '#bfdbfe', padding: '12px', borderRadius: '6px', border: '1px solid #60a5fa', marginBottom: '20px', fontSize: '14px', color: '#1e3a8a', lineHeight: '1.4', textAlign: 'center' }}>
                 <strong>🚧 Under Active Development 🚧</strong><br/>
                 We are actively building and iterating on this system. Features and data you add may be cleared, modified, or reset as we push updates.
@@ -47,6 +48,7 @@ export default function Auth({ setAuthData, setupNotice }) {
                 <button type="submit" style={{ padding: '10px', background: '#2563eb', color: 'white', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer' }}>Submit</button>
             </form>
             <p style={{ cursor: 'pointer', color: '#2563eb', marginTop: '16px', textAlign: 'center' }} onClick={() => setIsLoginView(!isLoginView)}>{isLoginView ? "Need an account? Register" : "Have an account? Login"}</p>
+            <div style={{ textAlign: 'center', fontSize: '12px', color: '#94a3b8', marginTop: '20px' }}>v{APP_VERSION}</div>
         </div>
     );
 }

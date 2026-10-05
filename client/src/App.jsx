@@ -6,6 +6,8 @@ import GroupManager from './GroupManager';
 import AdminPanel from './AdminPanel';
 import FoodManager from './FoodManager';
 
+const APP_VERSION = "2026.10.04.21.1";
+
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem('token'));
   const [role, setRole] = useState(localStorage.getItem('role'));
@@ -151,6 +153,7 @@ export default function App() {
             {(activeRole === 'parent' || activeRole === 'admin') && <button className={`nav-btn ${currentView === 'groups' ? 'active' : ''}`} onClick={() => setCurrentView('groups')}>Group Settings</button>}
             <button className={`nav-btn ${currentView === 'profile' ? 'active' : ''}`} onClick={() => setCurrentView('profile')}>Profile</button>
             <button className={`nav-btn ${currentView === 'about' ? 'active' : ''}`} onClick={() => setCurrentView('about')}>About</button>
+            {!impersonatingUser && (activeRole === 'admin' || activeRole === 'dietitian') && <button className={`nav-btn ${currentView === 'foods' ? 'active' : ''}`} onClick={() => setCurrentView('foods')}>Food Database</button>}
             {!impersonatingUser && activeRole === 'admin' && <button className={`nav-btn ${currentView === 'admin' ? 'active' : ''}`} onClick={() => setCurrentView('admin')}>Admin</button>}
           </div>
         </div>
@@ -167,7 +170,6 @@ export default function App() {
       {currentView === 'profile' && (
         <div style={{ maxWidth: '600px' }}>
           
-          {/* New PIN Callout */}
           {!impersonatingUser && (
               <div style={{ background: '#fef3c7', padding: '20px', borderRadius: '8px', border: '1px solid #fcd34d', marginBottom: '20px' }}>
                 <h3 style={{ margin: '0 0 10px 0', color: '#92400e' }}>Personal Connection PIN: <span style={{ letterSpacing: '2px', fontSize: '24px', marginLeft: '10px', background: 'white', padding: '4px 8px', borderRadius: '4px' }}>{myLinkCode}</span></h3>
@@ -196,6 +198,7 @@ export default function App() {
       {currentView === 'groups' && (activeRole === 'parent' || activeRole === 'admin') && <GroupManager groups={groups} token={token} impersonatingId={impersonatingUser?.id} apiFetch={apiFetch} refreshTrigger={() => setRefreshTrigger(p=>p+1)} />}
       
       {currentView === 'foods' && !impersonatingUser && (activeRole === 'admin' || activeRole === 'dietitian') && <FoodManager categorizedFoods={categorizedFoods} token={token} impersonatingId={impersonatingUser?.id} apiFetch={apiFetch} refreshTrigger={() => setRefreshTrigger(p=>p+1)} />}
+
       {currentView === 'admin' && !impersonatingUser && activeRole === 'admin' && <AdminPanel adminUsers={adminUsers} sysSettings={sysSettings} token={token} apiFetch={apiFetch} refreshTrigger={() => setRefreshTrigger(p=>p+1)} setImpersonatingUser={(u) => { setImpersonatingUser(u); setProfileName(u.name); setCurrentView('tracker'); }} />}
 
       {currentView === 'tracker' && (activeRole !== 'admin' || displayedUsers.length > 0) && (
@@ -216,6 +219,8 @@ export default function App() {
           <TrackerGrid displayedUsers={displayedUsers} gridData={gridData} setGridData={setGridData} categorizedFoods={filteredCategories} activeRole={activeRole} impersonatingId={impersonatingUser?.id} selectedWeek={selectedWeek} apiFetch={apiFetch} token={token} />
         </>
       )}
+
+      <div style={{ textAlign: 'center', fontSize: '12px', color: '#94a3b8', marginTop: '30px' }}>v{APP_VERSION}</div>
     </div>
   );
 }
