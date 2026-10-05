@@ -230,7 +230,6 @@ app.delete('/api/groups/:groupId/member/:userId', authenticate, async (req, res)
     res.json({ success: true });
 });
 
-// MULTI-ROW BULK USER ADDITION ENDPOINT
 app.post('/api/groups/:groupId/add_users_bulk', authenticate, async (req, res) => {
     if (req.userRole !== 'parent' && req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
     
@@ -302,6 +301,26 @@ app.get('/api/admin/users', authenticate, async (req, res) => {
     res.json(await db.all(`SELECT id, username, display_name, role, link_code, is_suspended, failed_attempts, locked_until FROM users`));
 });
 
+// GLOBAL USER PROVISIONING
+app.post('/api/admin/create_user', authenticate, async (req, res) => {
+    if (req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
+    const rawUsername = req.body.username;
+    if (!rawUsername) return res.status(400).json({ error: 'Username required' });
+    const lowerUsername = rawUsername.toLowerCase();
+    const displayName = req.body.displayName || rawUsername;
+    const hash = await bcrypt.hash(req.body.password, 10);
+    const role = req.body.role || 'user';
+    
+    const existing = await db.get('SELECT id FROM users WHERE LOWER(username) = ?', [lowerUsername]);
+    if (existing) return res.status(400).json({ error: 'Username already exists' });
+
+    try {
+        const linkCode = crypto.randomInt(100000, 1000000).toString();
+        await db.run('INSERT INTO users (username, password, role, display_name, link_code) VALUES (?, ?, ?, ?, ?)', [lowerUsername, hash, role, displayName, linkCode]);
+        res.json({ success: true });
+    } catch (e) { res.status(400).json({ error: 'Error' }); }
+});
+
 app.post('/api/admin/suspend/:id', authenticate, async (req, res) => {
     if (req.userRole !== 'admin') return res.status(403).json({error: 'Denied'});
     const target = await db.get('SELECT username, is_suspended FROM users WHERE id = ?', [req.params.id]);
@@ -354,3 +373,4 @@ cron.schedule('1 0 * * *', async () => {
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 app.listen(PORT, () => console.log(`API running on port ${PORT}`));
+// --- END SECTION 6 ---

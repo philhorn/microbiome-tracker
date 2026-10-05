@@ -1,7 +1,32 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 export default function AdminPanel({ adminUsers, sysSettings, token, apiFetch, refreshTrigger, setImpersonatingUser }) {
-    
+    const [createUsername, setCreateUsername] = useState('');
+    const [createDisplayName, setCreateDisplayName] = useState('');
+    const [createPassword, setCreatePassword] = useState('');
+    const [createRole, setCreateRole] = useState('dietitian');
+
+    const handleCreateGlobalUser = async (e) => {
+        e.preventDefault();
+        const res = await apiFetch('/api/admin/create_user', token, null, {
+            method: 'POST',
+            body: JSON.stringify({ 
+                username: createUsername.trim(), 
+                displayName: createDisplayName.trim(), 
+                password: createPassword, 
+                role: createRole 
+            })
+        });
+        const data = await res.json();
+        if (data.success) {
+            setCreateUsername(''); setCreateDisplayName(''); setCreatePassword(''); setCreateRole('dietitian');
+            refreshTrigger();
+            alert("User created successfully!");
+        } else {
+            alert(data.error);
+        }
+    };
+
     const adminAction = async (id, action, payload) => {
         if (action === 'impersonate') {
             setImpersonatingUser({ id: payload.id, name: payload.display_name, username: payload.username, role: payload.role });
@@ -26,6 +51,36 @@ export default function AdminPanel({ adminUsers, sysSettings, token, apiFetch, r
 
     return (
         <>
+            <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '30px' }}>
+                <h3 style={{ marginTop: 0 }}>Global User Provisioning</h3>
+                <form onSubmit={handleCreateGlobalUser} style={{ display: 'flex', gap: '15px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '8px', flexGrow: 1 }}>
+                        <strong>Username (Login ID):</strong>
+                        <input type="text" value={createUsername} onChange={e => setCreateUsername(e.target.value)} required className="form-input" />
+                    </label>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '8px', flexGrow: 1 }}>
+                        <strong>Display Name:</strong>
+                        <input type="text" value={createDisplayName} onChange={e => setCreateDisplayName(e.target.value)} className="form-input" />
+                    </label>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '8px', flexGrow: 1 }}>
+                        <strong>Password:</strong>
+                        <input type="password" value={createPassword} onChange={e => setCreatePassword(e.target.value)} required className="form-input" />
+                    </label>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '8px', flexGrow: 1 }}>
+                        <strong>Role:</strong>
+                        <select value={createRole} onChange={e => setCreateRole(e.target.value)} className="form-input">
+                            <option value="user">User</option>
+                            <option value="parent">Parent</option>
+                            <option value="dietitian">Dietitian</option>
+                            <option value="admin">Admin</option>
+                        </select>
+                    </label>
+                    <button type="submit" style={{ padding: '8px 16px', background: '#2563eb', color: 'white', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer', height: '35px' }}>
+                        Create User
+                    </button>
+                </form>
+            </div>
+
             <div style={{ overflowX: 'auto', marginBottom: '30px' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', background: 'white', border: '1px solid #e2e8f0' }}>
                     <thead><tr style={{ background: '#f8fafc', borderBottom: '2px solid #cbd5e1' }}>
@@ -52,6 +107,7 @@ export default function AdminPanel({ adminUsers, sysSettings, token, apiFetch, r
                     ))}</tbody>
                 </table>
             </div>
+            
             <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '8px', border: '1px solid #e2e8f0', maxWidth: '600px' }}>
                 <h3 style={{ marginTop: 0 }}>Global System Settings</h3>
                 <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
