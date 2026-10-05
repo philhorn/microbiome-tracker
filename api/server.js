@@ -90,6 +90,22 @@ const authenticate = (req, res, next) => {
     });
 };
 
+import { exec } from 'child_process';
+
+app.post('/api/webhook', (req, res) => {
+    // Extremely basic security - in production, you use crypto to verify a GitHub secret
+    const authHeader = req.headers['x-github-event'];
+    if (!authHeader || authHeader !== 'push') return res.status(403).send('Denied');
+
+    res.status(200).send('Build triggered');
+    
+    console.log('GitHub Push detected. Triggering deployment...' );
+    exec('/root/update.sh', (err, stdout, stderr) => {
+        if (err) console.error(`Deployment failed: ${err}`);
+        else console.log(`Deployment successful: ${stdout}`);
+    });
+});
+
 app.get('/api/setup-status', (req, res) => { res.json({ needsSetup: fs.existsSync(ADMIN_CRED_FILE) }); });
 
 app.post('/api/register', registerLimiter, async (req, res) => {
