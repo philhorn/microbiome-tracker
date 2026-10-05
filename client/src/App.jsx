@@ -4,6 +4,7 @@ import Auth from './Auth';
 import TrackerGrid from './TrackerGrid';
 import GroupManager from './GroupManager';
 import AdminPanel from './AdminPanel';
+import FoodManager from './FoodManager';
 
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem('token'));
@@ -194,6 +195,7 @@ export default function App() {
 
       {currentView === 'groups' && (activeRole === 'parent' || activeRole === 'admin') && <GroupManager groups={groups} token={token} impersonatingId={impersonatingUser?.id} apiFetch={apiFetch} refreshTrigger={() => setRefreshTrigger(p=>p+1)} />}
       
+      {currentView === 'foods' && !impersonatingUser && (activeRole === 'admin' || activeRole === 'dietitian') && <FoodManager categorizedFoods={categorizedFoods} token={token} impersonatingId={impersonatingUser?.id} apiFetch={apiFetch} refreshTrigger={() => setRefreshTrigger(p=>p+1)} />}
       {currentView === 'admin' && !impersonatingUser && activeRole === 'admin' && <AdminPanel adminUsers={adminUsers} sysSettings={sysSettings} token={token} apiFetch={apiFetch} refreshTrigger={() => setRefreshTrigger(p=>p+1)} setImpersonatingUser={(u) => { setImpersonatingUser(u); setProfileName(u.name); setCurrentView('tracker'); }} />}
 
       {currentView === 'tracker' && (activeRole !== 'admin' || displayedUsers.length > 0) && (

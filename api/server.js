@@ -145,6 +145,24 @@ app.post('/api/login', async (req, res) => {
 
 // --- SECTION 5: USER, GROUP & DATA ROUTES ---
 app.get('/api/foods', authenticate, async (req, res) => {
+app.post('/api/foods/manage', authenticate, async (req, res) => {
+    if (req.userRole !== 'admin' && req.userRole !== 'dietitian') return res.status(403).json({error: 'Denied'});
+    const { action, name, category, oldName } = req.body;
+    try {
+        if (action === 'add') {
+            await db.run('INSERT INTO foods (name, category) VALUES (?, ?)', [name.trim(), category.trim()]);
+        } else if (action === 'edit') {
+            await db.run('UPDATE foods SET name = ?, category = ? WHERE name = ?', [name.trim(), category.trim(), oldName]);
+            await db.run('UPDATE logs SET food_item = ? WHERE food_item = ?', [name.trim(), oldName]);
+        } else if (action === 'delete') {
+            await db.run('DELETE FROM foods WHERE name = ?', [name]);
+            await db.run('DELETE FROM logs WHERE food_item = ?', [name]);
+        }
+        res.json({ success: true });
+    } catch(e) {
+        res.status(400).json({ error: 'Database error' });
+    }
+});
     const rows = await db.all('SELECT name, category FROM foods ORDER BY category, name');
     const categorized = {};
     rows.forEach(r => { if (!categorized[r.category]) categorized[r.category] = []; categorized[r.category].push(r.name); });
