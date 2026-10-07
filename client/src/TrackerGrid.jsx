@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 
 const columnColors = ['#f0f9ff', '#f0fdf4', '#fefce8', '#fff1f2', '#f3e8ff', '#ecfeff', '#fdf4ff'];
 
-export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGridData, listItems, searchTerm, filterMode, sortMode, effectiveUserId, activeRole, impersonatingId, selectedWeek, apiFetch, token }) {
+export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGridData, listItems, searchTerm, filterMode, sortMode, effectiveUserId, activeRole, impersonatingId, selectedWeek, apiFetch, token, refreshTrigger }) {
     const [collapsedCats, setCollapsedCats] = useState({});
     const [collapsedGroups, setCollapsedGroups] = useState({});
     const [undoMemory, setUndoMemory] = useState({});
@@ -118,6 +118,16 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
         }
     };
 
+    const shiftUserColumn = async (groupId, membersArray, index, direction) => {
+        const newArr = [...membersArray];
+        if (direction === -1 && index > 0) [newArr[index - 1], newArr[index]] = [newArr[index], newArr[index - 1]];
+        else if (direction === 1 && index < newArr.length - 1) [newArr[index + 1], newArr[index]] = [newArr[index], newArr[index + 1]];
+        else return;
+        
+        await apiFetch(`/api/groups/${groupId}/reorder_personal`, token, impersonatingId, { method: 'POST', body: JSON.stringify({ order: newArr.map(m => m.id) }) });
+        refreshTrigger();
+    };
+
     const handleDrag = (e, colId, defaultWidth) => {
         const startX = e.clientX;
         const startWidth = colWidths[colId] || defaultWidth;
@@ -134,8 +144,8 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
             <style>{`
                 .tracker-table-container {
-                    overflow-x: auto;
-                    overflow-y: visible;
+                    max-height: 70vh;
+                    overflow: auto;
                     border: 1px solid #cbd5e1;
                     border-top: none;
                     border-bottom-left-radius: 8px;
@@ -143,14 +153,12 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
                     background: white;
                     -webkit-overflow-scrolling: touch;
                 }
-                /* STYLIZED VISIBLE HORIZONTAL SCROLLBAR */
                 .tracker-table-container::-webkit-scrollbar {
                     height: 12px;
+                    width: 12px;
                 }
                 .tracker-table-container::-webkit-scrollbar-track {
                     background: #f1f5f9;
-                    border-bottom-left-radius: 8px;
-                    border-bottom-right-radius: 8px;
                 }
                 .tracker-table-container::-webkit-scrollbar-thumb {
                     background: #94a3b8;
@@ -168,6 +176,7 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
                     min-width: max-content;
                     text-align: center;
                 }
+                /* ROBUST STICKY HEADERS & FROZEN COLUMNS */
                 .tracker-table th.person-col {
                     position: sticky;
                     top: 0;
@@ -242,8 +251,14 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
                                             </th>
                                             {group.members.map((m, idx) => (
                                                 <th key={m.id} className="person-col" style={{ width: colWidths[m.id] || 90, minWidth: 80, maxWidth: colWidths[m.id] || 90, background: columnColors[idx % columnColors.length], borderBottom: '2px solid #94a3b8', borderRight: '1px solid #e2e8f0' }}>
-                                                    <span style={{ fontWeight: 'bold' }}>{m.name}</span><br/>
-                                                    <span style={{ fontSize: '0.85em', fontWeight: 'normal', color: '#64748b' }}>Score: {gridData[group.id]?.[m.id]?.length || 0}</span>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2px' }}>
+                                                        <span style={{ fontWeight: 'bold', fontSize: '13px' }}>{m.name}</span>
+                                                        <div style={{ display: 'flex', gap: '2px' }}>
+                                                            <button onClick={(e) => { e.stopPropagation(); shiftUserColumn(group.id, group.members, idx, -1); }} title="Move column left" style={{ background: '#e2e8f0', border: 'none', borderRadius: '3px', width: '18px', height: '18px', cursor: 'pointer', fontSize: '10px', fontWeight: 'bold', lineHeight: 1 }}>◀</button>
+                                                            <button onClick={(e) => { e.stopPropagation(); shiftUserColumn(group.id, group.members, idx, 1); }} title="Move column right" style={{ background: '#e2e8f0', border: 'none', borderRadius: '3px', width: '18px', height: '18px', cursor: 'pointer', fontSize: '10px', fontWeight: 'bold', lineHeight: 1 }}>▶</button>
+                                                        </div>
+                                                    </div>
+                                                    <span style={{ fontSize: '0.8em', fontWeight: 'normal', color: '#64748b' }}>Score: {gridData[group.id]?.[m.id]?.length || 0}</span>
                                                     <div className="drag-handle" onMouseDown={(e) => handleDrag(e, m.id, 90)} />
                                                 </th>
                                             ))}

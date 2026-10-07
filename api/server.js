@@ -56,6 +56,7 @@ const db = {
             CREATE TABLE IF NOT EXISTS logs (id SERIAL PRIMARY KEY, user_id INTEGER REFERENCES users(id), week_id INTEGER, food_item TEXT, group_id INTEGER);
             CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
         CREATE TABLE IF NOT EXISTS groups (id SERIAL PRIMARY KEY, name TEXT, join_code TEXT UNIQUE, isolate_tracker INTEGER DEFAULT 0, app_name TEXT, theme_color TEXT, logo_url TEXT);
+        CREATE TABLE IF NOT EXISTS user_column_preferences (user_id INTEGER, group_id INTEGER, target_user_id INTEGER, sort_order INTEGER, PRIMARY KEY(user_id, group_id, target_user_id));
             CREATE TABLE IF NOT EXISTS group_members (group_id INTEGER, user_id INTEGER, sort_order INTEGER DEFAULT 0, PRIMARY KEY(group_id, user_id));
             CREATE TABLE IF NOT EXISTS foods (id SERIAL PRIMARY KEY, name TEXT, category TEXT, group_id INTEGER);
             
