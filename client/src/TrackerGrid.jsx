@@ -144,8 +144,8 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
             <style>{`
                 .tracker-table-container {
-                    max-height: 70vh;
-                    overflow: auto;
+                    overflow-x: auto;
+                    overflow-y: visible;
                     border: 1px solid #cbd5e1;
                     border-top: none;
                     border-bottom-left-radius: 8px;
@@ -154,19 +154,17 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
                     -webkit-overflow-scrolling: touch;
                 }
                 .tracker-table-container::-webkit-scrollbar {
-                    height: 12px;
-                    width: 12px;
+                    height: 10px;
                 }
                 .tracker-table-container::-webkit-scrollbar-track {
                     background: #f1f5f9;
                 }
                 .tracker-table-container::-webkit-scrollbar-thumb {
-                    background: #94a3b8;
-                    border-radius: 6px;
-                    border: 2px solid #f1f5f9;
+                    background: #cbd5e1;
+                    border-radius: 5px;
                 }
                 .tracker-table-container::-webkit-scrollbar-thumb:hover {
-                    background: #64748b;
+                    background: #94a3b8;
                 }
 
                 .tracker-table {
@@ -176,7 +174,7 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
                     min-width: max-content;
                     text-align: center;
                 }
-                /* ROBUST STICKY HEADERS & FROZEN COLUMNS */
+                /* STICKY HEADERS PINNED TO VIEWPORT WINDOW */
                 .tracker-table th.person-col {
                     position: sticky;
                     top: 0;
