@@ -17,7 +17,7 @@ dotenv.config();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
-const PORT = 3001;
+const PORT = Number(process.env.PORT) || 3001;
 const SECRET = crypto.randomBytes(32).toString('hex');
 const ADMIN_CRED_FILE = path.join(__dirname, 'admin_credentials.txt');
 
@@ -433,4 +433,4 @@ cron.schedule('1 0 * * *', async () => {
 });
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, '..', 'client', 'dist', 'index.html')));
-app.listen(PORT, () => console.log(`API running on port ${PORT}`));
+app.listen(PORT, process.env.HOST, () => console.log(`API running on ${process.env.HOST || '*'}:${PORT}`));

@@ -1,0 +1,30 @@
+# Installed by deploy-app.sh to /etc/systemd/system/microbiome.service.
+# DATABASE_URL comes from /etc/microbiome/microbiome.env (root-only, written by deploy-db.sh).
+[Unit]
+Description=Microbiome Tracker API
+After=network-online.target postgresql.service
+Wants=network-online.target postgresql.service
+
+[Service]
+Type=simple
+User=microbiome
+Group=microbiome
+WorkingDirectory=/var/www/microbiome-app/api
+Environment=NODE_ENV=production HOST=127.0.0.1 PORT=3001
+EnvironmentFile=/etc/microbiome/microbiome.env
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+RestartSec=2s
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+UMask=0027
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+
+[Install]
+WantedBy=multi-user.target

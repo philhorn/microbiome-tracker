@@ -18,4 +18,4 @@ git push origin main
 
 echo ""
 echo "✅ v$VERSION successfully pushed to GitHub."
-echo "You can now run /root/update.sh on the Proxmox LXC."
+echo "Deploy it: ssh -J lts-jump@clr1.londontechnologyservices.com root@10.100.20.12 /var/www/microbiome-app/deploy-app.sh"
