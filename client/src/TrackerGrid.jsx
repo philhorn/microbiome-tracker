@@ -306,12 +306,12 @@ export default function TrackerGrid({ groups, visibleGroupIds, gridData, setGrid
                                                             <span style={{ color: isGlobal ? '#1d4ed8' : 'inherit' }}>
                                                                 {item.name} {isGlobal && <span style={{fontSize: '10px', background: '#dbeafe', padding: '2px 4px', borderRadius: '4px', marginLeft: '6px', fontWeight: 'bold'}}>Global</span>}
                                                             </span>
-                                                            {(activeRole === 'parent' || activeRole === 'admin') && group.members.length > 0 && (
+                                                            {group.can_manage && group.members.length > 0 && (
                                                                 <button onClick={() => handleCheckAll(item.name, action, group, isGlobal)} title={hoverTitle} style={{ fontSize: '12px', padding: '4px 8px', background: btnColor, border: 'none', borderRadius: '4px', cursor: 'pointer', minWidth: '45px' }}>{allBtnText}</button>
                                                             )}
                                                         </td>
                                                         {group.members.map((m, idx) => (
-                                                            <td key={m.id} className="cell-pad" onClick={() => handleToggle(m.id, item.name, group.id, isGlobal, isUnified)} style={{ background: columnColors[idx % columnColors.length], borderBottom: '1px solid #f1f5f9', borderRight: '1px solid #e2e8f0', cursor: 'pointer' }}>
+                                                            <td key={m.id} className="cell-pad" onClick={() => (group.can_manage || m.id === effectiveUserId) && handleToggle(m.id, item.name, group.id, isGlobal, isUnified)} style={{ background: columnColors[idx % columnColors.length], borderBottom: '1px solid #f1f5f9', borderRight: '1px solid #e2e8f0', cursor: (group.can_manage || m.id === effectiveUserId) ? 'pointer' : 'default' }}>
                                                                 <input type="checkbox" checked={(gridData[group.id]?.[m.id] || []).includes(item.name)} readOnly style={{ width: '22px', height: '22px', pointerEvents: 'none' }} />
                                                             </td>
                                                         ))}

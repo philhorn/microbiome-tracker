@@ -44,9 +44,31 @@ export default function GroupManager({ groups, token, impersonatingId, apiFetch,
                     <button type="submit" className="form-btn" style={{ background: '#10b981' }}>Join Group</button>
                 </form>
             </div>
-            {groups.map((g, idx) => (
+            {groups.map((g, idx) => !g.can_manage ? (
+                <MemberGroupCard key={g.id} g={g} token={token} impersonatingId={impersonatingId} apiFetch={apiFetch} refreshTrigger={refreshTrigger} />
+            ) : (
                 <GroupCard key={g.id} g={g} index={idx} totalGroups={groups.length} handleJumpToPosition={handleJumpToPosition} token={token} impersonatingId={impersonatingId} apiFetch={apiFetch} refreshTrigger={refreshTrigger} />
             ))}
+        </div>
+    );
+}
+
+// A group the user belongs to but doesn't manage: its members, and leaving it.
+function MemberGroupCard({ g, token, impersonatingId, apiFetch, refreshTrigger }) {
+    const leave = async () => {
+        if (!window.confirm(`Leave "${g.name}"?`)) return;
+        const me = parseInt(impersonatingId || localStorage.getItem('userId'));
+        await apiFetch(`/api/groups/${g.id}/member/${me}`, token, impersonatingId, { method: 'DELETE' });
+        refreshTrigger();
+    };
+    return (
+        <div style={{ background: 'white', padding: '20px', borderRadius: '8px', border: '2px solid #e2e8f0', marginBottom: '15px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+                <h3 style={{ margin: 0 }}>{g.name}</h3>
+                <span style={{ fontSize: '12px', color: '#64748b' }}>Managed by its creator</span>
+                <button onClick={leave} style={{ marginLeft: 'auto', height: '32px', padding: '0 12px', background: '#fca5a5', color: '#7f1d1d', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Leave Group</button>
+            </div>
+            <div style={{ fontSize: '14px', color: '#475569' }}>Members: {g.members.map(m => m.name).join(', ')}</div>
         </div>
     );
 }

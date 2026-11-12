@@ -2,8 +2,8 @@
 # Deploys origin/main: builds the client, installs the API's dependencies and
 # restarts the API.
 #   systemd hosts (set up by deploy-db.sh): the microbiome unit, from
-#     deploy/microbiome.service, as the microbiome user with DATABASE_URL from
-#     /etc/microbiome/microbiome.env
+#     deploy/microbiome.service, as the microbiome user with DATABASE_URL and
+#     JWT_SECRET (generated here once) from /etc/microbiome/microbiome.env
 #   otherwise (legacy pm2 hosts): pm2 restart microbiome-api
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -25,6 +25,12 @@ echo "Installing backend dependencies..."
 healthy() { node -e 'fetch("http://127.0.0.1:3001/api/public-config").then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))'; }
 
 if [ -f /etc/microbiome/microbiome.env ] && command -v systemctl >/dev/null; then
+    # The key that signs sessions, made once on this host (mode 600, never printed).
+    if ! grep -q '^JWT_SECRET=.\{64\}' /etc/microbiome/microbiome.env; then
+        (umask 077 && { grep -v '^JWT_SECRET=' /etc/microbiome/microbiome.env || true; printf 'JWT_SECRET=%s\n' "$(openssl rand -hex 32)"; } > /etc/microbiome/microbiome.env.new)
+        mv -f /etc/microbiome/microbiome.env.new /etc/microbiome/microbiome.env
+        echo "Generated JWT_SECRET in /etc/microbiome/microbiome.env"
+    fi
     id microbiome >/dev/null 2>&1 || useradd --system --home-dir /nonexistent --shell /usr/sbin/nologin microbiome
     if ! cmp -s deploy/microbiome.service /etc/systemd/system/microbiome.service; then
         install -m 644 deploy/microbiome.service /etc/systemd/system/microbiome.service

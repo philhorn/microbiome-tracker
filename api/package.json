@@ -1,6 +1,9 @@
 {
   "name": "microbiome-api",
   "type": "module",
+  "scripts": {
+    "test": "node --test --test-force-exit test/*.test.js"
+  },
   "dependencies": {
     "bcrypt": "^5.1.1",
     "cors": "^2.8.5",

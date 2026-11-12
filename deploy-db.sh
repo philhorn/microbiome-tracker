@@ -26,7 +26,8 @@ pw=
 [ -n "$pw" ] || pw=$(openssl rand -hex 24) # hex needs no escaping in a URL or SQL
 
 install -d -m 750 /etc/microbiome
-(umask 077 && printf 'DATABASE_URL=postgresql://microbiome:%s@127.0.0.1:5432/microbiome\n' "$pw" > "$ENV_FILE.new")
+# Keep the other settings (JWT_SECRET, which deploy-app.sh generates).
+(umask 077 && { printf 'DATABASE_URL=postgresql://microbiome:%s@127.0.0.1:5432/microbiome\n' "$pw"; [ -f "$ENV_FILE" ] && grep -v '^DATABASE_URL=' "$ENV_FILE" || true; } > "$ENV_FILE.new")
 mv -f "$ENV_FILE.new" "$ENV_FILE"
 
 # On stdin, so the password is never on a command line.

@@ -7,6 +7,10 @@ export default function Auth({ setAuthData, setupNotice }) {
     const [displayName, setDisplayName] = useState('');
     const [password, setPassword] = useState('');
     const [isParentReg, setIsParentReg] = useState(false);
+    // Admin two-factor: 'code' asks for the authenticator code, 'setup' also shows the new key.
+    const [otpStep, setOtpStep] = useState(null);
+    const [otpSetup, setOtpSetup] = useState(null);
+    const [otp, setOtp] = useState('');
     
     const [appName, setAppName] = useState('Loading...');
     const [themeColor, setThemeColor] = useState('#2563eb');
@@ -21,10 +25,17 @@ export default function Auth({ setAuthData, setupNotice }) {
     const authSubmit = async (e) => {
         e.preventDefault();
         const endpoint = isLoginView ? '/api/login' : '/api/register';
-        const body = isLoginView ? { username, password } : { username, displayName, password, isParent: isParentReg };
+        const body = isLoginView ? { username, password, ...(otpStep ? { otp: otp.trim() } : {}) } : { username, displayName, password, isParent: isParentReg };
         try {
             const res = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
             const data = await res.json();
+            if (isLoginView && (data.totpRequired || data.totpSetup)) {
+                if (otpStep && otp) alert(data.error);
+                setOtpStep(data.totpSetup ? 'setup' : 'code');
+                setOtpSetup(data.totpSetup ? { secret: data.secret, otpauth: data.otpauth } : null);
+                setOtp('');
+                return;
+            }
             if (data.token) { setAuthData(data.token, data.role, data.name, data.username, data.link_code, data.id); } 
             else if (!isLoginView && data.success) { setIsLoginView(true); alert("Registered! Please log in."); } 
             else { alert(data.error); }
@@ -52,10 +63,19 @@ export default function Auth({ setAuthData, setupNotice }) {
                 <input type="text" placeholder="Username" value={username} onChange={e => setUsername(e.target.value)} required style={{ padding: '10px', borderRadius: '4px', border: '1px solid #cbd5e1' }}/>
                 {!isLoginView && <input type="text" placeholder="Display Name" value={displayName} onChange={e => setDisplayName(e.target.value)} required style={{ padding: '10px', borderRadius: '4px', border: '1px solid #cbd5e1' }}/>}
                 <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} required style={{ padding: '10px', borderRadius: '4px', border: '1px solid #cbd5e1' }}/>
+                {isLoginView && otpStep === 'setup' && otpSetup && (
+                    <div style={{ background: '#f1f5f9', padding: '12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px', lineHeight: '1.4' }}>
+                        <strong>Set up two-factor sign-in</strong><br/>
+                        Admin accounts need an authenticator app. Add this key to it (as a time-based key), then enter the 6-digit code it shows.
+                        <code style={{ display: 'block', marginTop: '8px', padding: '6px', background: 'white', wordBreak: 'break-all', userSelect: 'all' }}>{otpSetup.secret.match(/.{1,4}/g).join(' ')}</code>
+                        <a href={otpSetup.otpauth} style={{ fontSize: '12px' }}>Open in an authenticator app on this device</a>
+                    </div>
+                )}
+                {isLoginView && otpStep && <input type="text" inputMode="numeric" autoComplete="one-time-code" placeholder="6-digit authenticator code" value={otp} onChange={e => setOtp(e.target.value)} required pattern="[0-9 ]{6,7}" style={{ padding: '10px', borderRadius: '4px', border: '1px solid #cbd5e1' }}/>}
                 {!isLoginView && <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}><input type="checkbox" checked={isParentReg} onChange={e => setIsParentReg(e.target.checked)}/> Manager Account</label>}
                 <button type="submit" style={{ padding: '10px', background: themeColor, color: 'white', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer' }}>Submit</button>
             </form>
-            <p style={{ cursor: 'pointer', color: themeColor, marginTop: '16px', textAlign: 'center' }} onClick={() => setIsLoginView(!isLoginView)}>{isLoginView ? "Need an account? Register" : "Have an account? Login"}</p>
+            <p style={{ cursor: 'pointer', color: themeColor, marginTop: '16px', textAlign: 'center' }} onClick={() => { setIsLoginView(!isLoginView); setOtpStep(null); setOtpSetup(null); }}>{isLoginView ? "Need an account? Register" : "Have an account? Login"}</p>
             <div style={{ textAlign: 'center', fontSize: '12px', color: '#94a3b8', marginTop: '20px' }}>v{APP_VERSION}</div>
         </div>
     );
